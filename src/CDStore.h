@@ -11,12 +11,12 @@ typedef struct { char rid[40], cid[24], undo[40]; long long t; int o, r, ms, car
     CDEntry *log; NSInteger nlog, caplog;
     double cardsStamp, logStamp; long long logSize;
     NSMutableArray *mine;   // ids of the answers given since launch, newest last, for Undo
-    long today; int todayAnswers, todayMs, retTotal, retPass; NSMutableIndexSet *studyDays;
+    long today; int todayAnswers, todayMs, retTotal, retPass; NSMutableIndexSet *studyDays; NSMutableDictionary *dayAnswers;
     double retention; NSInteger newLimit, revLimit;
 }
 + (CDStore *)shared;
 - (BOOL)reloadIfChanged;   // re-reads the files if a sync changed them, the settings, or the day; posts CDStoreChanged
-- (NSArray *)decks; - (NSUInteger)cardCount; - (NSDate *)syncedAt; - (NSString *)syncedFrom;
+- (NSArray *)decks; - (NSUInteger)cardCount; - (NSUInteger)cardsInDeck:(NSString *)deck; - (NSDate *)syncedAt; - (NSString *)syncedFrom;
 - (CDCounts)countsForDeck:(NSString *)deck;   // nil means every deck
 - (NSInteger)nextCardInDeck:(NSString *)deck wait:(long long *)wait;   // -1 when nothing is due; *wait is then the seconds until a learning card returns, or -1
 - (NSDictionary *)card:(NSInteger)i;
@@ -26,5 +26,5 @@ typedef struct { char rid[40], cid[24], undo[40]; long long t; int o, r, ms, car
 - (BOOL)canUndo;
 - (NSInteger)undo;   // takes back the last answer; returns its card
 - (NSInteger)answersToday;
-- (NSArray *)statsSections;   // {title, rows: [[label, value]], footer}
+- (NSDictionary *)statsSummary;   // for the date-due slip: past and coming days as [stamp, count], and the totals
 @end

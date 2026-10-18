@@ -50,7 +50,7 @@ static int byTime(const void *a, const void *b) { const CDEntry *x = a, *y = b; 
 
 @implementation CDStore
 + (CDStore *)shared { static CDStore *s = nil; if (!s) { s = [[CDStore alloc] init]; [s reloadIfChanged]; } return s; }
-- (id)init { if ((self = [super init])) { cards = [[NSArray alloc] init]; decks = [[NSArray alloc] init]; mine = [[NSMutableArray alloc] init]; studyDays = [[NSMutableIndexSet alloc] init]; today = -1; cardsStamp = logStamp = -1; } return self; }
+- (id)init { if ((self = [super init])) { cards = [[NSArray alloc] init]; decks = [[NSArray alloc] init]; mine = [[NSMutableArray alloc] init]; studyDays = [[NSMutableIndexSet alloc] init]; dayAnswers = [[NSMutableDictionary alloc] init]; today = -1; cardsStamp = logStamp = -1; } return self; }
 
 - (void)loadCards {
     NSData *d = [NSData dataWithContentsOfFile:docs(@"cards.json")]; id j = d ? parseJSON(d) : nil;
@@ -92,7 +92,7 @@ static int byTime(const void *a, const void *b) { const CDEntry *x = a, *y = b; 
 
 - (void)apply:(CDEntry *)e {
     int prev = CDAnswer(&state[e->card], e->t, e->o, e->r, retention, CDSeed(e->rid)); long d = CDDay(e->t, e->o);
-    if (d > 0) [studyDays addIndex:d];
+    if (d > 0) { [studyDays addIndex:d]; NSNumber *k = [NSNumber numberWithLong:d]; [dayAnswers setObject:[NSNumber numberWithInt:[[dayAnswers objectForKey:k] intValue] + 1] forKey:k]; }
     if (prev == CDReview && d > today - 30) { retTotal++; if (e->r > 1) retPass++; }
     if (d == today) { todayAnswers++; todayMs += e->ms; buried[noteOf[e->card]] = YES; if (prev == CDNew) newToday[deckOf[e->card]]++; else if (prev == CDReview) revToday[deckOf[e->card]]++; }
 }
@@ -100,7 +100,7 @@ static int byTime(const void *a, const void *b) { const CDEntry *x = a, *y = b; 
     NSInteger n = [cards count], nd = [decks count];
     free(state); free(buried); free(newToday); free(revToday);
     state = calloc(n + 1, sizeof(CDCard)); buried = calloc(n + 1, sizeof(BOOL)); newToday = calloc(nd + 1, sizeof(int)); revToday = calloc(nd + 1, sizeof(int));
-    todayAnswers = todayMs = retTotal = retPass = 0; [studyDays removeAllIndexes];
+    todayAnswers = todayMs = retTotal = retPass = 0; [studyDays removeAllIndexes]; [dayAnswers removeAllObjects];
     today = CDDay(now(), offsetNow());
     qsort(log, nlog, sizeof(CDEntry), byTime);
     NSMutableSet *undone = nil;
@@ -126,6 +126,7 @@ static int byTime(const void *a, const void *b) { const CDEntry *x = a, *y = b; 
 
 - (NSArray *)decks { return decks; }
 - (NSUInteger)cardCount { return [cards count]; }
+- (NSUInteger)cardsInDeck:(NSString *)deck { NSUInteger k = [decks indexOfObject:deck], n = 0; for (NSUInteger i = 0; i < [cards count]; i++) if (deckOf[i] == (int)k) n++; return n; }
 - (NSDate *)syncedAt { return synced; }
 - (NSString *)syncedFrom { return from; }
 - (NSDictionary *)card:(NSInteger)i { return [cards objectAtIndex:i]; }
@@ -205,23 +206,28 @@ static int byTime(const void *a, const void *b) { const CDEntry *x = a, *y = b; 
     return card;
 }
 
-- (NSArray *)statsSections {
+- (NSString *)stampForDay:(long)d {   // the date a library stamp would print: OCT 18 2026
+    static NSDateFormatter *f = nil; if (!f) { f = [[NSDateFormatter alloc] init]; [f setLocale:[[[NSLocale alloc] initWithLocaleIdentifier:@"en_US"] autorelease]]; [f setDateFormat:@"MMM d yyyy"]; }
+    return [[f stringFromDate:[NSDate dateWithTimeIntervalSince1970:(double)d * 86400 + 4 * 3600 - offsetNow() + 12 * 3600]] uppercaseString];
+}
+- (NSDictionary *)statsSummary {
     [self rollover];
-    int by[4] = { 0 }, mature = 0, tomorrow = 0, week = 0, month = 0;
+    int by[4] = { 0 }, mature = 0, next[8] = { 0 };
     for (NSUInteger i = 0; i < [cards count]; i++) {
         CDCard *c = &state[i]; by[c->state]++;
         if (c->state != CDReview) continue;
         if (c->dueDay - c->lastDay >= 21) mature++;
-        if (c->dueDay == today + 1) tomorrow++; if (c->dueDay > today && c->dueDay <= today + 7) week++; if (c->dueDay > today && c->dueDay <= today + 30) month++;
+        if (c->dueDay > today && c->dueDay <= today + 7) next[c->dueDay - today]++;
     }
     int streak = 0; for (long d = [studyDays containsIndex:today] ? today : today - 1; d > 0 && [studyDays containsIndex:d]; d--) streak++;
-    NSString *(^num)(int) = ^(int v) { return [NSString stringWithFormat:@"%d", v]; };
-    NSString *mins = todayMs < 60000 ? [NSString stringWithFormat:@"%d sec", todayMs / 1000] : [NSString stringWithFormat:@"%d min", (todayMs + 30000) / 60000];
-    return [NSArray arrayWithObjects:
-        [NSDictionary dictionaryWithObjectsAndKeys:@"Today", @"title", [NSArray arrayWithObjects:[NSArray arrayWithObjects:@"Answers", num(todayAnswers), nil], [NSArray arrayWithObjects:@"New cards", num((int)[self sum:newToday]), nil], [NSArray arrayWithObjects:@"Time", mins, nil], [NSArray arrayWithObjects:@"Streak", [NSString stringWithFormat:@"%d day%@", streak, streak == 1 ? @"" : @"s"], nil], nil], @"rows", nil],
-        [NSDictionary dictionaryWithObjectsAndKeys:@"Coming Up", @"title", [NSArray arrayWithObjects:[NSArray arrayWithObjects:@"Tomorrow", num(tomorrow), nil], [NSArray arrayWithObjects:@"Next 7 days", num(week), nil], [NSArray arrayWithObjects:@"Next 30 days", num(month), nil], nil], @"rows", @"Reviews only. New cards come on top, up to the daily limit in Settings.", @"footer", nil],
-        [NSDictionary dictionaryWithObjectsAndKeys:@"Cards", @"title", [NSArray arrayWithObjects:[NSArray arrayWithObjects:@"New", num(by[CDNew]), nil], [NSArray arrayWithObjects:@"Learning", num(by[CDLearning] + by[CDRelearning]), nil], [NSArray arrayWithObjects:@"Young", num(by[CDReview] - mature), nil], [NSArray arrayWithObjects:@"Mature", num(mature), nil], nil], @"rows", @"Mature cards are ones you'll next see three weeks or more from their last review.", @"footer", nil],
-        [NSDictionary dictionaryWithObjectsAndKeys:@"Retention", @"title", [NSArray arrayWithObjects:[NSArray arrayWithObjects:@"Last 30 days", retTotal ? [NSString stringWithFormat:@"%d%%", (int)(100.0 * retPass / retTotal + 0.5)] : @"None yet", nil], [NSArray arrayWithObjects:@"Reviews", num(retTotal), nil], nil], @"rows", [NSString stringWithFormat:@"How often you remembered a graduated card, anything but Again. Cards are scheduled for %d%%.", (int)(retention * 100 + 0.5)], @"footer", nil], nil];
+    NSMutableArray *past = [NSMutableArray array], *coming = [NSMutableArray array];
+    for (NSUInteger d = [studyDays lastIndex]; d != NSNotFound && [past count] < 6; d = [studyDays indexLessThanIndex:d])
+        [past insertObject:[NSArray arrayWithObjects:[self stampForDay:(long)d], [dayAnswers objectForKey:[NSNumber numberWithLong:(long)d]], nil] atIndex:0];
+    for (int k = 1; k <= 7; k++) [coming addObject:[NSArray arrayWithObjects:[self stampForDay:today + k], [NSNumber numberWithInt:next[k]], nil]];
+    NSNumber *(^num)(int) = ^(int v) { return [NSNumber numberWithInt:v]; };
+    return [NSDictionary dictionaryWithObjectsAndKeys:past, @"past", coming, @"coming", num(todayAnswers), @"answersToday", num((int)[self sum:newToday]), @"newToday",
+            num((todayMs + 30000) / 60000), @"minutesToday", num(streak), @"streak", num(retTotal ? (int)(100.0 * retPass / retTotal + 0.5) : -1), @"retention", num(retTotal), @"reviews30",
+            num((int)(retention * 100 + 0.5)), @"target", num(by[CDNew]), @"cardsNew", num(by[CDLearning] + by[CDRelearning]), @"cardsLearning", num(by[CDReview] - mature), @"cardsYoung", num(mature), @"cardsMature", nil];
 }
 - (NSInteger)sum:(int *)a { NSInteger s = 0; for (NSUInteger k = 0; k < [decks count]; k++) s += a[k]; return s; }
 @end

@@ -1,14 +1,17 @@
 #import <UIKit/UIKit.h>
 #import "CDViewControllers.h"
 #import "CDStore.h"
+#import "CDSkin.h"
+#import <QuartzCore/QuartzCore.h>
 @interface CDAppDelegate : NSObject <UIApplicationDelegate> { UIWindow *window; UINavigationController *nav; }
 @end
 @implementation CDAppDelegate
 - (BOOL)application:(UIApplication *)app didFinishLaunchingWithOptions:(NSDictionary *)opts {
     [[NSUserDefaults standardUserDefaults] registerDefaults:[NSDictionary dictionaryWithObjectsAndKeys:[NSNumber numberWithInt:20], @"cd_new_per_day", [NSNumber numberWithInt:200], @"cd_max_reviews", [NSNumber numberWithDouble:0.9], @"cd_retention", nil]];   // Settings.bundle defaults only apply once the user opens Settings
     window = [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
-    nav = [[UINavigationController alloc] initWithRootViewController:[[[CDDecksViewController alloc] init] autorelease]]; nav.navigationBar.tintColor = CDTint();
+    nav = [[UINavigationController alloc] initWithRootViewController:[[[CDDecksViewController alloc] init] autorelease]]; CDSkinNavBar(nav.navigationBar);
     [window addSubview:nav.view]; [window makeKeyAndVisible];
+    float slow = [[NSUserDefaults standardUserDefaults] floatForKey:@"cd_test_speed"]; if (slow > 0) window.layer.speed = slow;   // slow motion, to catch an animation in a screenshot
     return YES;
 }
 - (void)applicationDidBecomeActive:(UIApplication *)app { [[NSUserDefaults standardUserDefaults] synchronize]; [[CDStore shared] reloadIfChanged]; }   // a sync, a settings change, or a new day

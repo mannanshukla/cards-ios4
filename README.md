@@ -2,6 +2,10 @@
 
 Flashcards for the iPod touch 4, written in Markdown on the Mac. Every file in `~/Cards` is a deck. `cards sync` sends them over USB and brings the answers back. Scheduling is FSRS-5, the algorithm Anki now uses, with Anki's learning steps: a new card comes back after 1 and 10 minutes before it moves to days.
 
+## The desk
+
+Each deck is a stack of ruled index cards on a honey-oak desk, two to a row, with folders as letterpressed headings and a red badge on any stack with reviews due. Tap a stack and it lifts, then opens. A study session is a card off the top of that stack: tap it to turn it over, then press one of four rubber stamps, Again, Hard, Good or Easy, with the interval each would give printed on it. The stamp lands on the card, the card goes on the done pile, and the next one comes off the stack. Stats is a library date-due slip in a manila pocket: the days you studied stamped in violet, the coming week's reviews in pencil tallies, and the totals typed on the pocket. Every surface is drawn in code and lit from above; the type is Helvetica throughout.
+
 ## Writing cards
 
 The formats are the ones Obsidian's Spaced Repetition plugin reads, so the same notes work there too.
@@ -38,9 +42,10 @@ A card is known by its front, minus formatting and furigana. Fixing a typo on th
 
 - `src/CDFSRS.c` is the scheduler in plain C. `tools/cards` has the same code in Python.
 - `src/CDStore` reads the two files, replays the log, picks the next card and appends answers.
-- `src/CDViewControllers` is the deck list, the study screen (each card is an index card in a UIWebView, so ruby and lists render) and Stats.
+- `src/CDViewControllers` is the stacks, the desk and Stats. A card's writing is a transparent UIWebView over the drawn card, so ruby and lists render, with its line height set to the card's rule spacing.
+- `src/CDMaterials.c` draws every material (oak, the raspberry book cloth of the bar, index cards and stacks, the badge, stamps and their impressions, the date-due slip) in plain C on CoreGraphics and CoreText. `src/CDSkin` turns those drawings into images once and keeps them in `Library/Caches`, drawing the desk's in the background while the stacks are on screen. A full screen of oak took over a second on the A4 when drawn at Retina resolution, so the grain is drawn at a pixel per point with full-resolution specks laid over it.
 - `tools/cards` is the Mac command, Python 3 standard library only. `~/.local/bin/cards` links to it.
-- `res/mkicon.swift` draws the icon.
+- `res/mkicon.swift` draws the icon. `res/Default.png` and `Default@2x.png`, the empty desk the app launches onto, come from `tests/preview.c`.
 
 ## Tests
 
@@ -50,6 +55,8 @@ A card is known by its front, minus formatting and furigana. Fixing a typo on th
 - `crosscheck.py` runs 2,000 random review histories through the C scheduler and the Python one. Every number has to match.
 - `store_check.py` builds `CDStore` for the Mac and replays a month of answers, with undos, a duplicated line and a torn last line, against `tools/cards`.
 - `vs_pyfsrs.py` holds the Python scheduler to the reference py-fsrs 5.1.3 when that package is installed.
+
+`tests/preview.c` renders each screen on the Mac at 640x960 from the same drawing code, with rough stand-ins for UIKit's bar buttons and the web view's text, and with `launch` it redraws the launch images.
 
 ## Building
 

@@ -1,6 +1,6 @@
 #import "CDSkin.h"
 
-#define CD_SKIN_VERSION @"6"   // bump when a drawing changes, so cached textures are drawn again
+#define CD_SKIN_VERSION @"7"   // bump when a drawing changes, so cached textures are drawn again
 static NSMutableDictionary *memory = nil; static NSMutableString *timings = nil;
 
 UIImage *CDRender(CGSize size, void (^draw)(CGContextRef c)) {
@@ -67,6 +67,10 @@ UIImage *CDSectionHeaderImage(NSString *title) {
 }
 UIImage *CDStampImage(int rating, BOOL pressed) {
     return CDCached([NSString stringWithFormat:@"stamp-%d-%d", rating, pressed], CGSizeMake(73, 70), ^(CGContextRef c) { CDDrawStamp(c, CGRectMake(0, 0, 73, 70), rating, pressed); });
+}
+UIImage *CDTabIcon(int which) { return CDCached([NSString stringWithFormat:@"tab-%d", which], CGSizeMake(30, 30), ^(CGContextRef c) { CDDrawTabIcon(c, CGRectMake(0, 0, 30, 30), which); }); }
+UIImage *CDSheetImage(CGFloat height, uint32_t seed) {
+    return CDCached([NSString stringWithFormat:@"sheet-%.0f-%u", height, seed], CGSizeMake(320, height + 14), ^(CGContextRef c) { CDDrawSheet(c, CGRectMake(10, 4, 300, height), seed); });
 }
 UIImage *CDImpressionImage(int rating, uint32_t seed) {
     return CDCached([NSString stringWithFormat:@"impression-%d-%u", rating, seed], CGSizeMake(136, 50), ^(CGContextRef c) { CDDrawImpression(c, CGRectMake(2, 2, 132, 46), rating, seed); });

@@ -12,6 +12,7 @@ typedef struct { char rid[40], cid[24], undo[40]; long long t; int o, r, ms, car
     double cardsStamp, logStamp; long long logSize;
     NSMutableArray *mine;   // ids of the answers given since launch, newest last, for Undo
     long today; int todayAnswers, todayMs, retTotal, retPass; NSMutableIndexSet *studyDays; NSMutableDictionary *dayAnswers;
+    int recent[30][4], weekPass[12], weekTotal[12];   // the last 30 days' answers by rating; reviews remembered and made, by weeks back
     double retention; NSInteger newLimit, revLimit;
 }
 + (CDStore *)shared;
@@ -26,5 +27,5 @@ typedef struct { char rid[40], cid[24], undo[40]; long long t; int o, r, ms, car
 - (BOOL)canUndo;
 - (NSInteger)undo;   // takes back the last answer; returns its card
 - (NSInteger)answersToday;
-- (NSDictionary *)statsSummary;   // for the date-due slip: past and coming days as [stamp, count], and the totals
+- (NSDictionary *)statsSummary;   // what Stats draws; the same numbers as `cards stats --json`
 @end

@@ -25,6 +25,7 @@ static void launch(const char *dir, CGFloat sc, const char *name) {   // Default
     CDDrawCloth(c, CGRectMake(0, 20, 320, 44));
     CGFloat k[] = { 0.25, 0.10, 0.02, 0.35,  0.25, 0.10, 0.02, 0 }, l[] = { 0, 1 }; CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB(); CGGradientRef g = CGGradientCreateWithColorComponents(cs, k, l, 2);
     CGContextDrawLinearGradient(c, g, CGPointMake(0, 64), CGPointMake(0, 71), 0); CGGradientRelease(g); CGColorSpaceRelease(cs);
+    CDDrawTabBar(c, CGRectMake(0, 431, 320, 49));
     save(c, dir, name);
 }
 static void say(CGContextRef c, const char *s, const char *f, CGFloat size, CGFloat x, CGFloat y, CGFloat r, CGFloat g, CGFloat b) {
@@ -37,6 +38,17 @@ static void say(CGContextRef c, const char *s, const char *f, CGFloat size, CGFl
     CFRelease(l); CFRelease(as); CFRelease(at); CGColorRelease(col); CGColorSpaceRelease(cs); CFRelease(font); CFRelease(fn); CFRelease(str);
 }
 static void pressed(CGContextRef c, const char *s, const char *f, CGFloat size, CGFloat x, CGFloat y, CGFloat r, CGFloat g, CGFloat b) { say(c, s, f, size, x, y + 1, 1, 0.97, 0.88); say(c, s, f, size, x, y, r, g, b); }   // letterpress, as a UILabel with a light shadow
+static void tabs(CGContextRef c, int selected) {   // UIKit's tab bar, roughly: the icon masks tinted, raspberry for the selected one
+    CDDrawTabBar(c, CGRectMake(0, 431, 320, 49)); const char *names[2] = { "Decks", "Stats" };
+    for (int i = 0; i < 2; i++) {
+        CGFloat x = 80 + i * 160 - 15;
+        if (i == selected) { CGContextSetRGBFillColor(c, 1, 1, 1, 0.10); CGContextFillRect(c, CGRectMake(x - 61, 433, 152, 45)); }
+        CGContextBeginTransparencyLayer(c, NULL); CDDrawTabIcon(c, CGRectMake(x, 434, 30, 30), i); CGContextSetBlendMode(c, kCGBlendModeSourceIn);
+        if (i == selected) CGContextSetRGBFillColor(c, 0.86, 0.30, 0.50, 1); else CGContextSetRGBFillColor(c, 0.55, 0.55, 0.55, 1);
+        CGContextFillRect(c, CGRectMake(x, 434, 30, 30)); CGContextEndTransparencyLayer(c);
+        say(c, names[i], "Helvetica-Bold", 10, x + 15, 474, i == selected ? 1 : 0.6, i == selected ? 1 : 0.6, i == selected ? 1 : 0.6);
+    }
+}
 static void bar(CGContextRef c, const char *title, const char *left, const char *right) {
     CGContextSetRGBFillColor(c, 0, 0, 0, 1); CGContextFillRect(c, CGRectMake(0, 0, 320, 20));
     CDDrawCloth(c, CGRectMake(0, 20, 320, 44));
@@ -79,19 +91,32 @@ static void desk(CGContextRef c, int answer) {
 int main(int argc, char **argv) {
     const char *dir = argc > 1 ? argv[1] : "."; CDShadowSign = -1;   // a flipped Mac bitmap: positive shadow heights go up
     if (argc > 2 && !strcmp(argv[2], "launch")) { launch(dir, 2, "Default@2x"); launch(dir, 1, "Default"); return 0; }
-    CGContextRef c = screen(480); bar(c, "Cards", NULL, "Stats");
+    CGContextRef c = screen(480); bar(c, "Cards", NULL, NULL);
     CDDrawOak(c, CGRectMake(0, 64, 320, 416), 3, 1);
     stack(c, 8, 76, 11, 4, "All Decks", "20 new \xC2\xB7 7 learning", NULL); stack(c, 162, 76, 12, 3, "Welcome", "7 learning", NULL);
     CDDrawSectionHeader(c, CGRectMake(0, 230, 320, 24), "JAPANESE");
     stack(c, 8, 258, 14, 4, "N5 Vocab", "20 new \xC2\xB7 3 due", "3");
-    pressed(c, "29 cards \xC2\xB7 synced today at 3:42 AM from MrLeeM1", "Helvetica", 11, 160, 428, 0.40, 0.26, 0.10);
-    save(c, dir, "decks");
+    pressed(c, "29 cards \xC2\xB7 synced today at 3:42 AM from MrLeeM1", "Helvetica", 11, 160, 414, 0.40, 0.26, 0.10);
+    tabs(c, 0); save(c, dir, "decks");
     c = screen(480); bar(c, "N5 Vocab", "Decks", "Undo"); desk(c, 0); save(c, dir, "front");
     c = screen(480); bar(c, "N5 Vocab", "Decks", "Undo"); desk(c, 1); save(c, dir, "answer");
+    CDChartData ch; memset(&ch, 0, sizeof ch);   // a month of sample studying
+    for (int i = 0; i < 30; i++) { int on = (i * 7) % 5 != 0; ch.answers[i][0] = on * ((i * 3) % 5); ch.answers[i][1] = on * ((i * 5) % 3); ch.answers[i][2] = on * (8 + (i * 11) % 14); ch.answers[i][3] = on * ((i * 13) % 4); ch.forecast[i] = (i * 17) % 23 / (1 + i / 10); }
+    for (int i = 5; i < 12; i++) { ch.weekTotal[i] = 20 + i * 3; ch.weekPass[i] = ch.weekTotal[i] * (80 + (i * 7) % 15) / 100; }
+    ch.states[0] = 140; ch.states[1] = 12; ch.states[2] = 58; ch.states[3] = 21; ch.answersToday = 22; ch.minutesToday = 9; ch.streak = 3; ch.target = 90;
+    ch.answersFrom = "Sep 19"; ch.answersMid = "Oct 4"; ch.forecastMid = "Nov 2"; ch.forecastTo = "Nov 16";
     CDStatsData d = { 5, { "OCT 12 2026", "OCT 13 2026", "OCT 15 2026", "OCT 16 2026", "OCT 18 2026" }, { 34, 12, 41, 18, 22 },
         { "OCT 19 2026", "OCT 20 2026", "OCT 21 2026", "OCT 22 2026", "OCT 23 2026", "OCT 24 2026", "OCT 25 2026" }, { 7, 12, 0, 3, 18, 5, 1 },
-        22, 6, 9, 3, 91, 64, 90, 140, 12, 58, 21 };
-    CGFloat h = CDDateDueHeight(&d) + 64; c = screen(h); bar(c, "Stats", NULL, "Done");
-    CDDrawOak(c, CGRectMake(0, 64, 320, h - 64), 5, 1); CGContextTranslateCTM(c, 0, 64); CDDrawDateDue(c, 320, &d); save(c, dir, "stats");
+        22, 6, 9, 3, 91, 64, 90, 140, 12, 58, 21, 1 };
+    CGFloat sizes[5] = { 76, 208, 176, 176, 104 }, h = 64 + 12; for (int i = 0; i < 5; i++) h += sizes[i] + 14; CGFloat slipTop = h; h += CDDateDueHeight(&d) + 49;
+    c = screen(h); bar(c, "Stats", NULL, NULL); CDDrawOak(c, CGRectMake(0, 64, 320, h - 64), 5, 1);
+    CGFloat y = 76; void (*draw[5])(CGContextRef, CGRect, const CDChartData *) = { CDDrawSummary, CDDrawAnswersChart, CDDrawForecastChart, CDDrawRetentionChart, CDDrawStatesChart };
+    for (int i = 0; i < 5; i++) { CGRect r = CGRectMake(10, y, 300, sizes[i]); CDDrawSheet(c, r, 80 + i); draw[i](c, r, &ch); y += sizes[i] + 14; }
+    CGContextSaveGState(c); CGContextTranslateCTM(c, 0, slipTop - 10); CDDrawDateDue(c, 320, &d); CGContextRestoreGState(c);
+    save(c, dir, "stats");
+    c = screen(480); bar(c, "Stats", NULL, NULL); CDDrawOak(c, CGRectMake(0, 64, 320, 416), 5, 1); y = 76;   // the first screenful, with its tab bar
+    for (int i = 0; i < 3; i++) { CGRect r = CGRectMake(10, y, 300, sizes[i]); CDDrawSheet(c, r, 80 + i); draw[i](c, r, &ch); y += sizes[i] + 14; }
+    memset(ch.weekTotal, 0, sizeof ch.weekTotal); CDDrawSheet(c, CGRectMake(10, y, 300, 176), 83); CDDrawRetentionChart(c, CGRectMake(10, y, 300, 176), &ch);   // and the retention chart's empty state
+    tabs(c, 1); save(c, dir, "stats-top");
     return 0;
 }

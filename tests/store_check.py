@@ -23,6 +23,9 @@ while t < now - 60:
         u = {"id": "%032x" % rng.getrandbits(128), "u": e["id"], "t": t + 5, "o": off}
         entries[u["id"]] = u
     t += rng.choice([20, 60, 600, 3600, 3600 * 5])
+for k in range(6):   # and a few in the last minutes, so today's numbers are tested whatever the hour
+    e = {"id": "%032x" % rng.getrandbits(128), "c": cs[rng.randrange(len(cs))]["id"], "t": now - 240 + k * 30, "o": off, "r": rng.choice([1, 2, 3, 4]), "ms": 4000}
+    entries[e["id"]] = e
 entries["orphan"] = {"id": "orphan", "c": "deadbeef0000", "t": now - 100, "o": off, "r": 3}   # a card that was deleted
 d = tempfile.mkdtemp()
 with open(os.path.join(d, "cards.json"), "w") as f:
@@ -49,6 +52,14 @@ for l in out:
             bad += 1; print("deck %s: app %s, python %s" % (name, nums, want))
         else:
             print("  %-12s new %d, learning %d, due %d (both)" % ((name,) + want))
+ch = cards.chart_data(cs, states, info)
+want = [n for d in ch["answers"] for n in d] + ch["forecast"] + [n for w in ch["weeks"] for n in w] + [ch["states"][k] for k in ("new", "learning", "young", "mature")] + \
+       [ch["today"]["answers"], ch["today"]["new"], ch["today"]["minutes"], ch["streak"], ch["retention"], ch["reviews30"]]
+got = [int(x) for x in [l for l in out if l.startswith("charts ")][0].split()[1:]]
+if got != want:
+    bad += 1; print("Stats charts differ:\n  app    %s\n  python %s" % (got, want))
+else:
+    print("  Stats charts: %d numbers agree (30 days by rating, 30-day forecast, 12 weeks, states, today)" % len(want))
 today = [l for l in out if l.startswith("today ")][0].split()[1]
 print("%d answers in the log (%d undone), %d answered today; %s" % (len(entries), len([e for e in entries.values() if "u" in e]), info["reviews"],
       "app and tools/cards agree on all %d cards" % len(cs) if not bad and int(today) == info["reviews"] else "%d differences, today %s vs %d" % (bad, today, info["reviews"])))

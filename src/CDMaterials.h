@@ -29,11 +29,30 @@ void CDDrawCountTab(CGContextRef c, CGRect r, long fresh, long learning, long du
 void CDDrawStamp(CGContextRef c, CGRect r, int rating, int pressed);      // rating 1 Again .. 4 Easy; the interval is a UILabel on top
 void CDDrawImpression(CGContextRef c, CGRect r, int rating, uint32_t seed);   // what a stamp leaves on a card
 
+// Stats: paper sheets on the desk with charts on graph paper, in the stamp inks.
+typedef struct {
+    int answers[30][4];                // the last 30 days, oldest first, by rating (Again, Hard, Good, Easy)
+    int forecast[30];                  // reviews due today (overdue included) and on each of the next 29 days
+    int weekPass[12], weekTotal[12];   // the last 12 weeks, oldest first: reviews remembered, reviews made
+    int states[4];                     // new, learning, young, mature
+    int answersToday, minutesToday, streak, target;
+    const char *answersFrom, *answersMid, *forecastMid, *forecastTo;   // date labels for the x axes
+} CDChartData;
+void CDDrawSheet(CGContextRef c, CGRect r, uint32_t seed);   // a sheet of paper on the desk; the charts draw onto one
+void CDDrawSummary(CGContextRef c, CGRect r, const CDChartData *d);
+void CDDrawAnswersChart(CGContextRef c, CGRect r, const CDChartData *d);
+void CDDrawForecastChart(CGContextRef c, CGRect r, const CDChartData *d);
+void CDDrawRetentionChart(CGContextRef c, CGRect r, const CDChartData *d);
+void CDDrawStatesChart(CGContextRef c, CGRect r, const CDChartData *d);
+void CDDrawTabIcon(CGContextRef c, CGRect r, int which);    // 0 decks, 1 stats: white on clear, for UITabBarItem's mask
+void CDDrawTabBar(CGContextRef c, CGRect r);                // the empty bar, for the launch image
+
 typedef struct {
     int npast; const char *pastDay[8]; int pastAnswers[8];   // the latest days studied, oldest first
     const char *nextDay[7]; int nextDue[7];                  // the coming week
     int answersToday, newToday, minutesToday, streak, retention, reviews30, target;   // retention -1 when there's none yet
     int cardsNew, cardsLearning, cardsYoung, cardsMature;
+    int plainPocket;                                         // the pocket without the typed totals, when the charts above already give them
 } CDStatsData;
 CGFloat CDDateDueHeight(const CDStatsData *d);
 void CDDrawDateDue(CGContextRef c, CGFloat width, const CDStatsData *d);   // the slip in its manila pocket

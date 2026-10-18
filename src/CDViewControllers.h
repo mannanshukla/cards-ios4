@@ -9,6 +9,6 @@
 }
 - (id)initWithDeck:(NSString *)d;   // nil studies every deck
 @end
-// Stats: a date-due slip in its manila pocket.
-@interface CDStatsViewController : UIViewController
+// Stats, its own tab: sheets of paper on the desk with the month's charts, then the date-due slip.
+@interface CDStatsViewController : UIViewController { UIScrollView *scroll; NSMutableArray *items; NSString *drawn; }
 @end

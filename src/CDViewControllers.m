@@ -28,7 +28,6 @@ static NSString *countsLine(CDCounts n) {
 - (id)init {
     if ((self = [super init])) {
         self.title = @"Cards"; items = [[NSMutableArray alloc] init]; targets = [[NSMutableArray alloc] init];
-        self.navigationItem.rightBarButtonItem = [[[UIBarButtonItem alloc] initWithTitle:@"Stats" style:UIBarButtonItemStyleBordered target:self action:@selector(stats)] autorelease];
         self.navigationItem.backBarButtonItem = [[[UIBarButtonItem alloc] initWithTitle:@"Decks" style:UIBarButtonItemStyleBordered target:nil action:nil] autorelease];
         [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(refresh) name:CDStoreChanged object:nil];
     }
@@ -56,8 +55,8 @@ static NSString *countsLine(CDCounts n) {
     [b addTarget:self action:@selector(settle:) forControlEvents:UIControlEventTouchUpOutside | UIControlEventTouchCancel | UIControlEventTouchDragExit];
     [b addTarget:self action:@selector(open:) forControlEvents:UIControlEventTouchUpInside];
     [self add:b];
-    UILabel *name = pressedLabel(CGRectMake(o.x, o.y + CD_STACK_H - 3, CD_STACK_W, 18), [UIFont boldSystemFontOfSize:14], [UIColor colorWithRed:0.24 green:0.15 blue:0.06 alpha:1]); name.text = all ? @"All Decks" : leaf(d); [self add:name];
-    UILabel *counts = pressedLabel(CGRectMake(o.x, o.y + CD_STACK_H + 15, CD_STACK_W, 16), [UIFont systemFontOfSize:12], [UIColor colorWithRed:0.42 green:0.28 blue:0.12 alpha:1]); counts.text = countsLine(n); [self add:counts];
+    UILabel *name = pressedLabel(CGRectMake(o.x, o.y + CD_STACK_H - 3, CD_STACK_W, 19), [UIFont boldSystemFontOfSize:15], [UIColor colorWithRed:0.20 green:0.12 blue:0.04 alpha:1]); name.text = all ? @"All Decks" : leaf(d); [self add:name];
+    UILabel *counts = pressedLabel(CGRectMake(o.x, o.y + CD_STACK_H + 16, CD_STACK_W, 16), [UIFont systemFontOfSize:12.5], [UIColor colorWithRed:0.33 green:0.21 blue:0.08 alpha:1]); counts.text = countsLine(n); [self add:counts];
 }
 - (void)refresh {
     for (UIView *v in items) [v removeFromSuperview]; [items removeAllObjects]; [targets removeAllObjects];
@@ -105,40 +104,42 @@ static NSString *countsLine(CDCounts n) {
     static BOOL warm = NO; if (!warm) { warm = YES; CDWarmUp(); }
     NSUserDefaults *u = [NSUserDefaults standardUserDefaults]; NSString *t = [u stringForKey:@"cd_test_study"];
     if (t) { [u removeObjectForKey:@"cd_test_study"]; [self study:[t isEqualToString:@"*"] ? nil : t]; }
-    if ([u boolForKey:@"cd_test_stats"]) { [u removeObjectForKey:@"cd_test_stats"]; [self stats]; }
+    if ([u boolForKey:@"cd_test_stats"]) { [u removeObjectForKey:@"cd_test_stats"]; self.tabBarController.selectedIndex = 1; }
     [u synchronize];
 }
 - (void)study:(NSString *)deck { [self.navigationController pushViewController:[[[CDStudyViewController alloc] initWithDeck:deck] autorelease] animated:YES]; }
-- (void)stats {
-    UINavigationController *n = [[[UINavigationController alloc] initWithRootViewController:[[[CDStatsViewController alloc] init] autorelease]] autorelease];
-    CDSkinNavBar(n.navigationBar); [self presentModalViewController:n animated:YES];
-}
 @end
 
 #pragma mark - The desk
 
-// The card's writing; its line height is the card's rule spacing, so the words sit on the blue lines.
+// The card's writing, bold and centred; its line height is the card's rule spacing, so the words sit on the blue lines.
 static NSString *const CSS = @"html{-webkit-text-size-adjust:none}"
-    "body{margin:0;padding:0 16px;background:transparent;color:#1e2330;font:17px/20px Helvetica;word-wrap:break-word;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:rgba(0,0,0,0)}"
-    ".head{height:32px;position:relative;font:9px/12px Helvetica;color:#8f8c93;letter-spacing:1px;text-transform:uppercase}"
+    "body{margin:0;padding:0 14px;background:transparent;color:#1b1f2a;font:bold 18px/20px Helvetica,'Hiragino Kaku Gothic ProN';text-align:center;word-wrap:break-word;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:rgba(0,0,0,0)}"
+    ".head{height:32px;position:relative;font:normal 9px/12px Helvetica;color:#8f8c93;letter-spacing:1px;text-transform:uppercase}"
     ".deck{position:absolute;left:0;bottom:6px;max-width:170px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.kind{position:absolute;right:0;bottom:6px}"
     "p{margin:0 0 20px}p:last-child,.face>:last-child{margin-bottom:0}"
-    ".big{font-size:40px;line-height:40px;text-align:center;padding-top:20px}.big ruby rt{font-size:15px}"
-    "ruby rt{font-size:10px;color:#666c7c}"
-    "ul,ol{margin:0 0 20px;padding-left:22px}pre{font:13px/20px Courier;margin:0 0 20px;white-space:pre-wrap}code{font:15px Courier}"
+    ".big{font-size:42px;line-height:40px}.big ruby rt{font-size:15px}"
+    "ruby rt{font-size:10px;font-weight:normal;color:#666c7c}"
+    "ul,ol{display:inline-block;text-align:left;margin:0 0 20px;padding-left:22px}pre{display:inline-block;text-align:left;font:13px/20px Courier;margin:0 0 20px;white-space:pre-wrap}code{font-family:Courier;font-size:16px}"
     "blockquote{margin:0 0 20px;font-style:italic}mark{background:rgba(255,160,195,.5);color:inherit}"
-    ".q{font-size:13px;line-height:20px;color:#8b8fa1;text-align:center;padding-top:6px}.q .big{font-size:inherit;line-height:inherit;padding:0}.q ruby rt{font-size:8px}.q p{margin:0}"
-    ".a{padding-top:14px}.a .big{padding-top:10px}"
-    ".done{text-align:center;padding-top:20px;color:#4a4f5c}.done b{display:block;font-size:24px;line-height:40px;color:#1e2330}";
+    ".q{font-weight:normal;font-size:13px;line-height:20px;color:#8b8fa1;padding-top:6px}.q .big{font-size:inherit;line-height:inherit;padding:0}.q ruby rt{font-size:8px}.q p{margin:0}"
+    ".a{padding-top:14px}"
+    ".done{font-weight:normal;color:#4a4f5c}.done b{display:block;font-size:24px;line-height:40px;color:#1b1f2a}";
+// Centre the writing down the card. On the front it moves in whole rules so every line still sits on a blue one;
+// the back has no rules, so the answer is simply centred under the grey question.
+static NSString *const CENTRE = @"var f=document.getElementById('f'),a=document.getElementById('a'),q=document.querySelector('.q');"
+    "if(f)f.style.paddingTop=Math.max(0,Math.floor((%d-f.offsetHeight)/%d)*%d)+'px';"
+    "if(a)a.style.paddingTop=Math.max(12,Math.floor((%d-(q?q.offsetHeight:0)-a.offsetHeight)/2))+'px';";
 static NSString *page(NSString *body) {
-    return [NSString stringWithFormat:@"<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=%d,initial-scale=1,maximum-scale=1,user-scalable=no\"><style>%@</style></head><body>%@</body></html>", CD_CARD_W, CSS, body];
+    return [NSString stringWithFormat:@"<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=%d,initial-scale=1,maximum-scale=1,user-scalable=no\"><style>%@</style></head><body>%@<script>%@</script></body></html>", CD_CARD_W, CSS, body,
+            [NSString stringWithFormat:CENTRE, CD_CARD_FIRST_RULE + 6 * CD_CARD_RULE - CD_CARD_HEADER, 2 * CD_CARD_RULE, CD_CARD_RULE, CD_CARD_H - 4 - 14]];
 }
 static NSString *esc(NSString *s) { return [[[s stringByReplacingOccurrencesOfString:@"&" withString:@"&amp;"] stringByReplacingOccurrencesOfString:@"<" withString:@"&lt;"] stringByReplacingOccurrencesOfString:@">" withString:@"&gt;"]; }
 
 @implementation CDStudyViewController
 - (id)initWithDeck:(NSString *)d {
     if ((self = [super init])) {
-        deck = [d copy]; current = -1; self.title = d ? leaf(d) : @"All Decks";
+        deck = [d copy]; current = -1; self.title = d ? leaf(d) : @"All Decks"; self.hidesBottomBarWhenPushed = YES;
         self.navigationItem.rightBarButtonItem = [[[UIBarButtonItem alloc] initWithTitle:@"Undo" style:UIBarButtonItemStyleBordered target:self action:@selector(undo)] autorelease];
         [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(storeChanged) name:CDStoreChanged object:nil];
     }
@@ -230,7 +231,7 @@ static NSString *esc(NSString *s) { return [[[s stringByReplacingOccurrencesOfSt
     front.hidden = NO; back.hidden = YES; host.transform = CGAffineTransformIdentity;
     [self updateTab]; [self showStamps:NO animated:NO]; hint.alpha = 0; [UIView animateWithDuration:0.3 animations:^{ hint.alpha = 1; }];
     if (current < 0) {
-        NSInteger n = [[CDStore shared] answersToday]; NSMutableString *s = [NSMutableString stringWithFormat:@"<div class=\"head\"><span class=\"kind\">%@</span></div><div class=\"done\"><b>%@</b>", wait > 0 ? @"Learning" : @"Done", wait > 0 ? @"Nothing more just now." : @"That's all for today!"];
+        NSInteger n = [[CDStore shared] answersToday]; NSMutableString *s = [NSMutableString stringWithFormat:@"<div class=\"head\"><span class=\"kind\">%@</span></div><div class=\"done\" id=\"f\"><b>%@</b>", wait > 0 ? @"Learning" : @"Done", wait > 0 ? @"Nothing more just now." : @"That's all for today!"];
         if (n) [s appendFormat:@"%@ today.<br>", plural(n, @"answer", @"answers")];
         if (wait > 0) { [s appendFormat:@"A learning card comes back in %@.", plural((long)((wait + 59) / 60), @"minute", @"minutes")]; waitTimer = [NSTimer scheduledTimerWithTimeInterval:15 target:self selector:@selector(checkWaiting) userInfo:nil repeats:YES]; }
         else if (![[CDStore shared] cardCount]) [s appendString:@"There are no cards yet. Sync some from the Mac."];
@@ -239,9 +240,9 @@ static NSString *esc(NSString *s) { return [[[s stringByReplacingOccurrencesOfSt
     }
     NSDictionary *c = [[CDStore shared] card:current]; [shownAt release]; shownAt = [[NSDate alloc] init];
     NSString *kinds[] = { @"New card", @"Learning", @"Review", @"Relearning" };
-    [self load:frontWeb body:[NSString stringWithFormat:@"<div class=\"head\"><span class=\"deck\">%@</span><span class=\"kind\">%@</span></div><div class=\"face\">%@</div>",
+    [self load:frontWeb body:[NSString stringWithFormat:@"<div class=\"head\"><span class=\"deck\">%@</span><span class=\"kind\">%@</span></div><div class=\"face\" id=\"f\">%@</div>",
                               esc(deck ? @"" : [c objectForKey:@"deck"]), kinds[[[CDStore shared] kindOfCard:current]], [c objectForKey:@"front"]]];
-    [self load:backWeb body:[NSString stringWithFormat:@"<div class=\"q\">%@</div><div class=\"face a\">%@</div>", [c objectForKey:@"front"], [c objectForKey:@"back"]]];
+    [self load:backWeb body:[NSString stringWithFormat:@"<div class=\"q\">%@</div><div class=\"face a\" id=\"a\">%@</div>", [c objectForKey:@"front"], [c objectForKey:@"back"]]];
     if (animated) {
         host.transform = peekAt[0]; busy = YES;
         [UIView animateWithDuration:0.26 delay:0 options:UIViewAnimationOptionCurveEaseOut animations:^{ host.transform = CGAffineTransformIdentity; } completion:^(BOOL f) { busy = NO; [self updateTab]; }];
@@ -300,24 +301,48 @@ static NSString *esc(NSString *s) { return [[[s stringByReplacingOccurrencesOfSt
 @implementation CDStatsViewController
 - (id)init {
     if ((self = [super init])) {
-        self.title = @"Stats";
-        self.navigationItem.rightBarButtonItem = [[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(done)] autorelease];
+        self.title = @"Stats"; items = [[NSMutableArray alloc] init];
+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(refresh) name:CDStoreChanged object:nil];
     }
     return self;
 }
-- (void)done { [self dismissModalViewControllerAnimated:YES]; }
+- (void)dealloc { [[NSNotificationCenter defaultCenter] removeObserver:self]; [scroll release]; [items release]; [drawn release]; [super dealloc]; }
 - (void)loadView {
-    UIView *v = [[[UIView alloc] initWithFrame:CGRectMake(0, 0, 320, 416)] autorelease]; self.view = v;
-    UIScrollView *s = [[[UIScrollView alloc] initWithFrame:v.bounds] autorelease]; s.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight; s.backgroundColor = CDDeskColor(); [v addSubview:s];
-    NSDictionary *st = [[CDStore shared] statsSummary]; NSArray *past = [st objectForKey:@"past"], *coming = [st objectForKey:@"coming"];
-    CDStatsData d; memset(&d, 0, sizeof d); d.npast = (int)MIN([past count], 8);
+    UIView *v = [[[UIView alloc] initWithFrame:CGRectMake(0, 0, 320, 367)] autorelease]; self.view = v;
+    scroll = [[UIScrollView alloc] initWithFrame:v.bounds]; scroll.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    scroll.backgroundColor = CDDeskColor(); scroll.alwaysBounceVertical = YES; [v addSubview:scroll]; [v addSubview:CDTopShade(320)];
+}
+- (void)viewWillAppear:(BOOL)a { [super viewWillAppear:a]; if (![[CDStore shared] reloadIfChanged]) [self refresh]; }
+- (void)refresh {
+    if (!self.isViewLoaded) return;
+    NSDictionary *st = [[CDStore shared] statsSummary]; NSString *key = [st description];
+    if ([key isEqualToString:drawn]) return;   // nothing has changed since these were drawn
+    [drawn release]; drawn = [key copy];
+    for (UIView *v in items) [v removeFromSuperview]; [items removeAllObjects];
+    #define N(k) [[st objectForKey:k] intValue]
+    NSDateFormatter *f = [[[NSDateFormatter alloc] init] autorelease]; [f setDateFormat:@"MMM d"]; NSDate *today = [st objectForKey:@"today"];
+    NSString *(^day)(int) = ^(int k) { return [f stringFromDate:[today dateByAddingTimeInterval:k * 86400.0]]; };
+    CDChartData ch; memset(&ch, 0, sizeof ch);
+    NSArray *answers = [st objectForKey:@"answers"], *forecast = [st objectForKey:@"forecast"], *weeks = [st objectForKey:@"weeks"];
+    for (int i = 0; i < 30; i++) { for (int k = 0; k < 4; k++) ch.answers[i][k] = [[[answers objectAtIndex:i] objectAtIndex:k] intValue]; ch.forecast[i] = [[forecast objectAtIndex:i] intValue]; }
+    for (int i = 0; i < 12; i++) { ch.weekPass[i] = [[[weeks objectAtIndex:i] objectAtIndex:0] intValue]; ch.weekTotal[i] = [[[weeks objectAtIndex:i] objectAtIndex:1] intValue]; }
+    ch.states[0] = N(@"cardsNew"); ch.states[1] = N(@"cardsLearning"); ch.states[2] = N(@"cardsYoung"); ch.states[3] = N(@"cardsMature");
+    ch.answersToday = N(@"answersToday"); ch.minutesToday = N(@"minutesToday"); ch.streak = N(@"streak"); ch.target = N(@"target");
+    ch.answersFrom = [day(-29) UTF8String]; ch.answersMid = [day(-15) UTF8String]; ch.forecastMid = [day(15) UTF8String]; ch.forecastTo = [day(29) UTF8String];
+    CGFloat heights[5] = { 76, 208, 176, 176, 104 }, y = 8;
+    void (*charts[5])(CGContextRef, CGRect, const CDChartData *) = { CDDrawSummary, CDDrawAnswersChart, CDDrawForecastChart, CDDrawRetentionChart, CDDrawStatesChart };
+    for (int i = 0; i < 5; i++) {   // the paper is drawn once and kept; only the ink on it changes
+        UIImage *sheet = CDSheetImage(heights[i], 80 + i); void (*draw)(CGContextRef, CGRect, const CDChartData *) = charts[i]; CGFloat h = heights[i];
+        UIImageView *v = [[[UIImageView alloc] initWithImage:CDRender(sheet.size, ^(CGContextRef c) { [sheet drawAtPoint:CGPointZero]; draw(c, CGRectMake(10, 4, 300, h), &ch); })] autorelease];
+        v.frame = CGRectMake(0, y, sheet.size.width, sheet.size.height); [scroll addSubview:v]; [items addObject:v]; y += h + 14;
+    }
+    NSArray *past = [st objectForKey:@"past"], *coming = [st objectForKey:@"coming"];   // and the date-due slip, as the history
+    CDStatsData d; memset(&d, 0, sizeof d); d.npast = (int)MIN([past count], 8); d.plainPocket = 1;
     for (int i = 0; i < d.npast; i++) { d.pastDay[i] = [[[past objectAtIndex:i] objectAtIndex:0] UTF8String]; d.pastAnswers[i] = [[[past objectAtIndex:i] objectAtIndex:1] intValue]; }
     for (int i = 0; i < 7 && i < (int)[coming count]; i++) { d.nextDay[i] = [[[coming objectAtIndex:i] objectAtIndex:0] UTF8String]; d.nextDue[i] = [[[coming objectAtIndex:i] objectAtIndex:1] intValue]; }
-    #define N(k) [[st objectForKey:k] intValue]
-    d.answersToday = N(@"answersToday"); d.newToday = N(@"newToday"); d.minutesToday = N(@"minutesToday"); d.streak = N(@"streak"); d.retention = N(@"retention"); d.reviews30 = N(@"reviews30"); d.target = N(@"target");
-    d.cardsNew = N(@"cardsNew"); d.cardsLearning = N(@"cardsLearning"); d.cardsYoung = N(@"cardsYoung"); d.cardsMature = N(@"cardsMature");
-    CGFloat h = CDDateDueHeight(&d);
-    UIImageView *slip = [[[UIImageView alloc] initWithImage:CDRender(CGSizeMake(320, h), ^(CGContextRef c) { CDDrawDateDue(c, 320, &d); })] autorelease];
-    [s addSubview:slip]; s.contentSize = CGSizeMake(320, h); [v addSubview:CDTopShade(320)];
+    CGFloat sh = CDDateDueHeight(&d);
+    UIImageView *slip = [[[UIImageView alloc] initWithImage:CDRender(CGSizeMake(320, sh), ^(CGContextRef c) { CDDrawDateDue(c, 320, &d); })] autorelease];
+    slip.frame = CGRectMake(0, y - 6, 320, sh); [scroll addSubview:slip]; [items addObject:slip];
+    scroll.contentSize = CGSizeMake(320, y - 6 + sh);
 }
 @end

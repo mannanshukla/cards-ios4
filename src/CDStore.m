@@ -94,6 +94,8 @@ static int byTime(const void *a, const void *b) { const CDEntry *x = a, *y = b; 
     int prev = CDAnswer(&state[e->card], e->t, e->o, e->r, retention, CDSeed(e->rid)); long d = CDDay(e->t, e->o);
     if (d > 0) { [studyDays addIndex:d]; NSNumber *k = [NSNumber numberWithLong:d]; [dayAnswers setObject:[NSNumber numberWithInt:[[dayAnswers objectForKey:k] intValue] + 1] forKey:k]; }
     if (prev == CDReview && d > today - 30) { retTotal++; if (e->r > 1) retPass++; }
+    if (d > today - 30 && d <= today) recent[d - today + 29][e->r - 1]++;
+    if (prev == CDReview && d <= today && (today - d) / 7 < 12) { weekTotal[(today - d) / 7]++; if (e->r > 1) weekPass[(today - d) / 7]++; }
     if (d == today) { todayAnswers++; todayMs += e->ms; buried[noteOf[e->card]] = YES; if (prev == CDNew) newToday[deckOf[e->card]]++; else if (prev == CDReview) revToday[deckOf[e->card]]++; }
 }
 - (void)replay {
@@ -101,6 +103,7 @@ static int byTime(const void *a, const void *b) { const CDEntry *x = a, *y = b; 
     free(state); free(buried); free(newToday); free(revToday);
     state = calloc(n + 1, sizeof(CDCard)); buried = calloc(n + 1, sizeof(BOOL)); newToday = calloc(nd + 1, sizeof(int)); revToday = calloc(nd + 1, sizeof(int));
     todayAnswers = todayMs = retTotal = retPass = 0; [studyDays removeAllIndexes]; [dayAnswers removeAllObjects];
+    memset(recent, 0, sizeof recent); memset(weekPass, 0, sizeof weekPass); memset(weekTotal, 0, sizeof weekTotal);
     today = CDDay(now(), offsetNow());
     qsort(log, nlog, sizeof(CDEntry), byTime);
     NSMutableSet *undone = nil;
@@ -212,12 +215,13 @@ static int byTime(const void *a, const void *b) { const CDEntry *x = a, *y = b; 
 }
 - (NSDictionary *)statsSummary {
     [self rollover];
-    int by[4] = { 0 }, mature = 0, next[8] = { 0 };
+    int by[4] = { 0 }, mature = 0, next[8] = { 0 }, forecast[30] = { 0 };
     for (NSUInteger i = 0; i < [cards count]; i++) {
         CDCard *c = &state[i]; by[c->state]++;
         if (c->state != CDReview) continue;
         if (c->dueDay - c->lastDay >= 21) mature++;
         if (c->dueDay > today && c->dueDay <= today + 7) next[c->dueDay - today]++;
+        if (c->dueDay - today < 30) forecast[MAX(0, c->dueDay - today)]++;   // today's includes the overdue
     }
     int streak = 0; for (long d = [studyDays containsIndex:today] ? today : today - 1; d > 0 && [studyDays containsIndex:d]; d--) streak++;
     NSMutableArray *past = [NSMutableArray array], *coming = [NSMutableArray array];
@@ -225,7 +229,11 @@ static int byTime(const void *a, const void *b) { const CDEntry *x = a, *y = b; 
         [past insertObject:[NSArray arrayWithObjects:[self stampForDay:(long)d], [dayAnswers objectForKey:[NSNumber numberWithLong:(long)d]], nil] atIndex:0];
     for (int k = 1; k <= 7; k++) [coming addObject:[NSArray arrayWithObjects:[self stampForDay:today + k], [NSNumber numberWithInt:next[k]], nil]];
     NSNumber *(^num)(int) = ^(int v) { return [NSNumber numberWithInt:v]; };
-    return [NSDictionary dictionaryWithObjectsAndKeys:past, @"past", coming, @"coming", num(todayAnswers), @"answersToday", num((int)[self sum:newToday]), @"newToday",
+    NSMutableArray *answers = [NSMutableArray array], *ahead = [NSMutableArray array], *weeks = [NSMutableArray array];
+    for (int k = 0; k < 30; k++) { [answers addObject:[NSArray arrayWithObjects:num(recent[k][0]), num(recent[k][1]), num(recent[k][2]), num(recent[k][3]), nil]]; [ahead addObject:num(forecast[k])]; }
+    for (int k = 11; k >= 0; k--) [weeks addObject:[NSArray arrayWithObjects:num(weekPass[k]), num(weekTotal[k]), nil]];
+    NSDate *noon = [NSDate dateWithTimeIntervalSince1970:(double)today * 86400 + 4 * 3600 - offsetNow() + 12 * 3600];   // for the charts' date labels
+    return [NSDictionary dictionaryWithObjectsAndKeys:answers, @"answers", ahead, @"forecast", weeks, @"weeks", noon, @"today", past, @"past", coming, @"coming", num(todayAnswers), @"answersToday", num((int)[self sum:newToday]), @"newToday",
             num((todayMs + 30000) / 60000), @"minutesToday", num(streak), @"streak", num(retTotal ? (int)(100.0 * retPass / retTotal + 0.5) : -1), @"retention", num(retTotal), @"reviews30",
             num((int)(retention * 100 + 0.5)), @"target", num(by[CDNew]), @"cardsNew", num(by[CDLearning] + by[CDRelearning]), @"cardsLearning", num(by[CDReview] - mature), @"cardsYoung", num(mature), @"cardsMature", nil];
 }

@@ -14,4 +14,6 @@ UIImage *CDBadgeImage(NSString *count);
 UIImage *CDSectionHeaderImage(NSString *title);
 UIImage *CDStampImage(int rating, BOOL pressed);
 UIImage *CDImpressionImage(int rating, uint32_t seed);
+UIImage *CDTabIcon(int which);   // 0 decks, 1 stats
+UIImage *CDSheetImage(CGFloat height, uint32_t seed);   // a sheet of paper for Stats, with room around it for its shadow
 void CDWarmUp(void);           // draws the desk's textures in the background

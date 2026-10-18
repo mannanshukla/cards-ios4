@@ -352,7 +352,7 @@ static void tally(CGContextRef c, CGFloat x, CGFloat base, int n) {   // pencil 
         if (k < 4) line(c, gx + k * 4.5, base - 11, gx + k * 4.5, base); else line(c, gx - 2.5, base - 2.5, gx + 16, base - 9);
     }
 }
-CGFloat CDDateDueHeight(const CDStatsData *d) { return 16 + 58 + 16 + DD_PAST * DD_ROW + 28 + 7 * DD_ROW + 8 + 232 + 20; }
+CGFloat CDDateDueHeight(const CDStatsData *d) { return 16 + 58 + 16 + DD_PAST * DD_ROW + 28 + 7 * DD_ROW + 8 + (d->plainPocket ? 76 : 232) + 20; }
 void CDDrawDateDue(CGContextRef c, CGFloat width, const CDStatsData *d) {
     static const CGFloat tone[] = { 0.995, 0.98, 0.94 }, black[4] = { 0.15, 0.14, 0.16, 0.95 }, grey[4] = { 0.45, 0.44, 0.47, 1 }, rule[4] = { 0.50, 0.58, 0.78, 0.45 };
     CGFloat sx = 34, sw = width - 68, top = 16, colX = sx + floor(sw * 0.5);
@@ -383,7 +383,7 @@ void CDDrawDateDue(CGContextRef c, CGFloat width, const CDStatsData *d) {
         else text(c, "\xE2\x80\x94", HELV, 12, grey, 0, (colX + sx + sw) / 2, y + 17, 0, 1);
     }
     // the manila pocket, with a thumb notch to pull the slip by
-    CGRect pk = CGRectMake(18, pocketY, width - 36, 232); CGFloat nx = CGRectGetMidX(pk), nr = 15;
+    CGRect pk = CGRectMake(18, pocketY, width - 36, d->plainPocket ? 76 : 232); CGFloat nx = CGRectGetMidX(pk), nr = 15;
     CGMutablePathRef pp = CGPathCreateMutable(); CGPathMoveToPoint(pp, NULL, pk.origin.x, pk.origin.y); CGPathAddLineToPoint(pp, NULL, nx - nr, pk.origin.y);
     CGPathAddArc(pp, NULL, nx, pk.origin.y, nr, M_PI, 0, true); CGPathAddLineToPoint(pp, NULL, CGRectGetMaxX(pk), pk.origin.y);
     CGPathAddLineToPoint(pp, NULL, CGRectGetMaxX(pk), CGRectGetMaxY(pk) - 2); CGPathAddArcToPoint(pp, NULL, CGRectGetMaxX(pk), CGRectGetMaxY(pk), CGRectGetMaxX(pk) - 2, CGRectGetMaxY(pk), 2);
@@ -395,6 +395,7 @@ void CDDrawDateDue(CGContextRef c, CGFloat width, const CDStatsData *d) {
     CGPathRelease(pp);
     stroke(c, RASPBERRY[0], RASPBERRY[1], RASPBERRY[2], 0.5, 1); CGContextStrokeRect(c, CGRectInset(pk, 9.5, 24.5)); stroke(c, RASPBERRY[0], RASPBERRY[1], RASPBERRY[2], 0.5, 0.5); CGContextStrokeRect(c, CGRectInset(pk, 12.25, 27.25));
     text(c, "CARDS \xC2\xB7 LENDING RECORD", HELV_BOLD, 10, RASPBERRY, 1.6, nx, pk.origin.y + 46, 0, 1);
+    if (d->plainPocket) return;
     const char *labels[] = { "TODAY", "STREAK", "RETENTION", "IN THE FILE" }; char vals[4][2][64];
     snprintf(vals[0][0], 64, "%d answered, %d new", d->answersToday, d->newToday); snprintf(vals[0][1], 64, "%d min at the desk", d->minutesToday);
     snprintf(vals[1][0], 64, "%d day%s", d->streak, d->streak == 1 ? "" : "s"); vals[1][1][0] = 0;
@@ -410,4 +411,152 @@ void CDDrawDateDue(CGContextRef c, CGFloat width, const CDStatsData *d) {
         if (vals[i][1][0]) { text(c, vals[i][1], HELV, 12, grey, 0, vx, fy + 16, CGRectGetMaxX(pk) - 22 - vx, 0); fy += 16; }
         fy += 26;
     }
+}
+
+#pragma mark - charts
+
+static const CGFloat INKS4[4][3] = { { 0.80, 0.17, 0.18 }, { 0.42, 0.43, 0.47 }, { 0.16, 0.56, 0.28 }, { 0.20, 0.42, 0.76 } };   // the stamp pads, a shade lighter for bars
+static const CGFloat TITLE[4] = { 0.15, 0.15, 0.18, 1 }, CAPTION[4] = { 0.45, 0.45, 0.49, 1 }, AXIS[4] = { 0.52, 0.53, 0.58, 1 };
+void CDDrawSheet(CGContextRef c, CGRect r, uint32_t seed) {
+    CGPathRef p = rounded(r, 2); static const CGFloat tone[] = { 0.995, 0.99, 0.975 };
+    CGContextSaveGState(c); castShadow(c, 1.5, 3.5, 0.40); fill(c, 1, 1, 1, 1); fillPath(c, p); CGContextRestoreGState(c);
+    paper(c, p, r, seed, tone, 0.5); stroke(c, 0.70, 0.66, 0.58, 0.45, 0.5); CGContextAddPath(c, p); CGContextStrokePath(c); CGPathRelease(p);
+}
+static void heading(CGContextRef c, CGRect r, const char *title, const char *aside) {
+    text(c, title, HELV_BOLD, 14, TITLE, 0, r.origin.x + 14, r.origin.y + 24, r.size.width - 120, 0);
+    if (aside) text(c, aside, HELV, 12, CAPTION, 0, CGRectGetMaxX(r) - 14, r.origin.y + 24, 110, 2);
+}
+static void graphPaper(CGContextRef c, CGRect p) {   // a recessed panel of fine blue grid
+    fill(c, 0.975, 0.98, 0.985, 1); CGContextFillRect(c, p);
+    CGContextSaveGState(c); CGContextClipToRect(c, p); stroke(c, 0.55, 0.68, 0.86, 0.22, 0.5); CGContextBeginPath(c);
+    for (CGFloat x = p.origin.x + 10; x < CGRectGetMaxX(p); x += 10) { CGContextMoveToPoint(c, hair(x), p.origin.y); CGContextAddLineToPoint(c, hair(x), CGRectGetMaxY(p)); }
+    for (CGFloat y = p.origin.y + 10; y < CGRectGetMaxY(p); y += 10) { CGContextMoveToPoint(c, p.origin.x, hair(y)); CGContextAddLineToPoint(c, CGRectGetMaxX(p), hair(y)); }
+    CGContextStrokePath(c);
+    CGFloat sh[] = { 0.2, 0.2, 0.3, 0.12,  0.2, 0.2, 0.3, 0 }, sl[] = { 0, 1 }; gradient(c, p.origin, CGPointMake(p.origin.x, p.origin.y + 3), 2, sh, sl);   // the panel sits a hair below the paper
+    CGContextRestoreGState(c);
+    stroke(c, 0.62, 0.66, 0.74, 0.7, 0.5); CGContextStrokeRect(c, CGRectMake(p.origin.x + 0.25, p.origin.y + 0.25, p.size.width - 0.5, p.size.height - 0.5));
+}
+static int niceMax(int v) { static const int steps[] = { 2, 4, 6, 10, 20, 30, 40, 60, 100, 150, 200, 300, 400, 600, 1000, 2000, 5000 }; for (int i = 0; i < 17; i++) if (v <= steps[i]) return steps[i]; return v; }
+static void gridLabels(CGContextRef c, CGRect plot, int max, const char *suffix) {   // two values on the left, their lines across
+    char buf[32]; stroke(c, 0.45, 0.50, 0.62, 0.35, 0.5); CGFloat dash[2] = { 2, 2 }; CGContextSetLineDash(c, 0, dash, 2);
+    for (int i = 1; i <= 2; i++) { CGFloat y = hair(CGRectGetMaxY(plot) - plot.size.height * i / 2); line(c, plot.origin.x, y, CGRectGetMaxX(plot), y); }
+    CGContextSetLineDash(c, 0, NULL, 0);
+    for (int i = 0; i <= 2; i++) { snprintf(buf, sizeof buf, "%d%s", max * i / 2, suffix); text(c, buf, HELV, 9, AXIS, 0, plot.origin.x - 4, CGRectGetMaxY(plot) - plot.size.height * i / 2 + 3, 0, 2); }
+}
+static void glossBar(CGContextRef c, CGRect b) {   // light from the left of a rounded bar, and a lit top edge
+    if (b.size.height <= 0) return;
+    CGContextSaveGState(c); CGContextClipToRect(c, b);
+    CGFloat g[] = { 1, 1, 1, 0.38,  1, 1, 1, 0.05,  0, 0, 0, 0.10 }, l[] = { 0, 0.45, 1 }; gradient(c, b.origin, CGPointMake(CGRectGetMaxX(b), b.origin.y), 3, g, l);
+    fill(c, 1, 1, 1, 0.45); CGContextFillRect(c, CGRectMake(b.origin.x, b.origin.y, b.size.width, 0.5));
+    CGContextRestoreGState(c);
+}
+static CGRect plotIn(CGRect r, CGFloat top) { return CGRectMake(r.origin.x + 40, r.origin.y + top, r.size.width - 54, r.size.height - top - 30); }
+static void bars(CGContextRef c, CGRect plot, int n, const int *stack, int layers, const CGFloat (*colours)[3], int max) {
+    CGFloat w = plot.size.width / n, bw = fmax(2, floor((w - 2) * 2) / 2);
+    for (int i = 0; i < n; i++) {
+        CGFloat x = round((plot.origin.x + i * w + (w - bw) / 2) * 2) / 2, y = CGRectGetMaxY(plot), top = y;
+        for (int k = 0; k < layers; k++) {
+            int v = stack[i * layers + k]; if (!v) continue;
+            CGFloat h = plot.size.height * v / max; top -= h; fill(c, colours[k][0], colours[k][1], colours[k][2], 1); CGContextFillRect(c, CGRectMake(x, top, bw, h));
+        }
+        if (top < y) { glossBar(c, CGRectMake(x, top, bw, y - top)); stroke(c, 0, 0, 0, 0.18, 0.5); CGContextStrokeRect(c, CGRectMake(x + 0.25, top + 0.25, bw - 0.5, y - top - 0.25)); }
+    }
+}
+static void empty(CGContextRef c, CGRect panel, const char *s) { text(c, s, HELV, 12, CAPTION, 0, CGRectGetMidX(panel), CGRectGetMidY(panel) + 4, panel.size.width - 20, 1); }
+void CDDrawSummary(CGContextRef c, CGRect r, const CDChartData *d) {
+    char v[3][32]; const char *cap[3] = { d->answersToday == 1 ? "answer today" : "answers today", d->streak == 1 ? "day streak" : "day streak", "min studied today" };
+    snprintf(v[0], 32, "%d", d->answersToday); snprintf(v[1], 32, "%d", d->streak); snprintf(v[2], 32, "%d", d->minutesToday);
+    CGFloat w = r.size.width / 3;
+    for (int i = 0; i < 3; i++) {
+        CGFloat cx = r.origin.x + w * i + w / 2; text(c, v[i], HELV_BOLD, 28, TITLE, 0, cx, r.origin.y + 42, 0, 1); text(c, cap[i], HELV, 11, CAPTION, 0, cx, r.origin.y + 60, w - 8, 1);
+        if (i) { CGFloat x = hair(r.origin.x + w * i); stroke(c, 0.55, 0.53, 0.50, 0.35, 0.5); line(c, x, r.origin.y + 16, x, CGRectGetMaxY(r) - 14); stroke(c, 1, 1, 1, 0.9, 0.5); line(c, x + 0.5, r.origin.y + 16, x + 0.5, CGRectGetMaxY(r) - 14); }
+    }
+}
+void CDDrawAnswersChart(CGContextRef c, CGRect r, const CDChartData *d) {
+    int total = 0, peak = 0; for (int i = 0; i < 30; i++) { int t = 0; for (int k = 0; k < 4; k++) t += d->answers[i][k]; total += t; if (t > peak) peak = t; }
+    char aside[32]; snprintf(aside, sizeof aside, "%d answer%s", total, total == 1 ? "" : "s"); heading(c, r, "Last 30 Days", aside);
+    CGRect plot = plotIn(r, 58), panel = CGRectInset(plot, -6, -6); panel.origin.x -= 26; panel.size.width += 26; graphPaper(c, panel);
+    if (!total) empty(c, panel, "No answers in the last 30 days.");
+    else { int max = niceMax(peak); gridLabels(c, plot, max, ""); bars(c, plot, 30, &d->answers[0][0], 4, INKS4, max); }
+    text(c, d->answersFrom, HELV, 10, AXIS, 0, plot.origin.x, CGRectGetMaxY(panel) + 14, 0, 0); text(c, d->answersMid, HELV, 10, AXIS, 0, CGRectGetMidX(plot), CGRectGetMaxY(panel) + 14, 0, 1);
+    text(c, "Today", HELV, 10, AXIS, 0, CGRectGetMaxX(plot), CGRectGetMaxY(panel) + 14, 0, 2);
+    const char *names[4] = { "Again", "Hard", "Good", "Easy" }; CGFloat x = CGRectGetMaxX(r) - 14;   // the legend, right to left under the heading
+    for (int k = 3; k >= 0; k--) {
+        static const CGFloat k4[4] = { 0, 0, 0, 1 }; CTLineRef l = makeLine(names[k], HELV, 10, k4, 0); CGFloat w = widthOf(l); CFRelease(l);
+        text(c, names[k], HELV, 10, CAPTION, 0, x - w, r.origin.y + 42, 0, 0); x -= w + 10;
+        fill(c, INKS4[k][0], INKS4[k][1], INKS4[k][2], 1); CGContextFillRect(c, CGRectMake(x, r.origin.y + 35, 7, 7)); x -= 12;
+    }
+}
+void CDDrawForecastChart(CGContextRef c, CGRect r, const CDChartData *d) {
+    int total = 0, peak = 0; for (int i = 0; i < 30; i++) { total += d->forecast[i]; if (d->forecast[i] > peak) peak = d->forecast[i]; }
+    char aside[32]; snprintf(aside, sizeof aside, "%d review%s", total, total == 1 ? "" : "s"); heading(c, r, "Coming Due", aside);
+    CGRect plot = plotIn(r, 44), panel = CGRectInset(plot, -6, -6); panel.origin.x -= 26; panel.size.width += 26; graphPaper(c, panel);
+    static const CGFloat rasp[1][3] = { { 0.72, 0.20, 0.40 } };
+    if (!total) empty(c, panel, "Nothing due in the next 30 days.");
+    else { int max = niceMax(peak); gridLabels(c, plot, max, ""); bars(c, plot, 30, d->forecast, 1, rasp, max); }
+    text(c, "Today", HELV, 10, AXIS, 0, plot.origin.x, CGRectGetMaxY(panel) + 14, 0, 0); text(c, d->forecastMid, HELV, 10, AXIS, 0, CGRectGetMidX(plot), CGRectGetMaxY(panel) + 14, 0, 1);
+    text(c, d->forecastTo, HELV, 10, AXIS, 0, CGRectGetMaxX(plot), CGRectGetMaxY(panel) + 14, 0, 2);
+}
+static void dot(CGContextRef c, CGPoint p, const CGFloat *rgb) {   // a glossy bead, lit from above
+    CGRect e = CGRectMake(p.x - 4.5, p.y - 4.5, 9, 9);
+    CGContextSaveGState(c); castShadow(c, 1, 1.5, 0.35); fill(c, 1, 1, 1, 1); CGContextFillEllipseInRect(c, e); CGContextRestoreGState(c);
+    fill(c, rgb[0], rgb[1], rgb[2], 1); CGContextFillEllipseInRect(c, CGRectInset(e, 1.5, 1.5));
+    fill(c, 1, 1, 1, 0.55); CGContextFillEllipseInRect(c, CGRectMake(p.x - 2, p.y - 3, 3.5, 2));
+}
+void CDDrawRetentionChart(CGContextRef c, CGRect r, const CDChartData *d) {
+    int weeks = 0, pass = 0, total = 0; for (int i = 0; i < 12; i++) if (d->weekTotal[i]) { weeks++; pass += d->weekPass[i]; total += d->weekTotal[i]; }
+    char aside[48]; if (total) snprintf(aside, sizeof aside, "%d%% overall", (int)(100.0 * pass / total + 0.5)); heading(c, r, "Retention by Week", total ? aside : NULL);
+    CGRect plot = plotIn(r, 44), panel = CGRectInset(plot, -6, -6); panel.origin.x -= 26; panel.size.width += 26; graphPaper(c, panel);
+    text(c, "12 weeks ago", HELV, 10, AXIS, 0, plot.origin.x, CGRectGetMaxY(panel) + 14, 0, 0); text(c, "This week", HELV, 10, AXIS, 0, CGRectGetMaxX(plot), CGRectGetMaxY(panel) + 14, 0, 2);
+    if (!weeks) { empty(c, panel, "Shows up once you review cards you've learned."); return; }
+    CGFloat lo = 50;   // 50-100%: below half is off the bottom of the chart, as it should be rare
+    #define RY(v) (CGRectGetMaxY(plot) - plot.size.height * (fmax(lo, fmin(100, (v))) - lo) / (100 - lo))
+    char buf[16]; stroke(c, 0.45, 0.50, 0.62, 0.35, 0.5); CGFloat dash[2] = { 2, 2 }; CGContextSetLineDash(c, 0, dash, 2);
+    for (int v = 75; v <= 100; v += 25) line(c, plot.origin.x, hair(RY(v)), CGRectGetMaxX(plot), hair(RY(v)));
+    stroke(c, RASPBERRY[0], RASPBERRY[1], RASPBERRY[2], 0.75, 1); CGFloat dash2[2] = { 4, 3 }; CGContextSetLineDash(c, 0, dash2, 2); line(c, plot.origin.x, RY(d->target), CGRectGetMaxX(plot), RY(d->target));   // the aim
+    CGContextSetLineDash(c, 0, NULL, 0);
+    for (int v = 50; v <= 100; v += 25) { snprintf(buf, sizeof buf, "%d%%", v); text(c, buf, HELV, 9, AXIS, 0, plot.origin.x - 4, RY(v) + 3, 0, 2); }
+    CGFloat step = plot.size.width / 11; CGPoint pts[12]; int n = 0;
+    for (int i = 0; i < 12; i++) if (d->weekTotal[i]) pts[n++] = CGPointMake(plot.origin.x + i * step, RY(100.0 * d->weekPass[i] / d->weekTotal[i]));
+    if (n > 1) { stroke(c, INKS4[3][0], INKS4[3][1], INKS4[3][2], 0.9, 2); CGContextSetLineJoin(c, kCGLineJoinRound); CGContextAddLines(c, pts, n); CGContextStrokePath(c); }
+    for (int i = 0; i < n; i++) dot(c, pts[i], INKS4[3]);
+}
+void CDDrawStatesChart(CGContextRef c, CGRect r, const CDChartData *d) {
+    static const CGFloat col[4][3] = { { 0.20, 0.42, 0.76 }, { 0.80, 0.17, 0.18 }, { 0.42, 0.70, 0.36 }, { 0.12, 0.45, 0.22 } };
+    const char *names[4] = { "new", "learning", "young", "mature" }; int total = d->states[0] + d->states[1] + d->states[2] + d->states[3];
+    char aside[32]; snprintf(aside, sizeof aside, "%d card%s", total, total == 1 ? "" : "s"); heading(c, r, "In the File", aside);
+    CGRect b = CGRectMake(r.origin.x + 14, r.origin.y + 38, r.size.width - 28, 16); CGPathRef track = rounded(b, 3);
+    CGContextSaveGState(c); CGContextAddPath(c, track); CGContextClip(c); fill(c, 0.90, 0.90, 0.92, 1); CGContextFillRect(c, b);
+    CGFloat x = b.origin.x;
+    for (int k = 0; k < 4 && total; k++) { CGFloat w = round(b.size.width * d->states[k] / total * 2) / 2; if (k == 3) w = CGRectGetMaxX(b) - x; fill(c, col[k][0], col[k][1], col[k][2], 1); CGContextFillRect(c, CGRectMake(x, b.origin.y, w, b.size.height)); x += w; }
+    CGFloat g[] = { 1, 1, 1, 0.40,  1, 1, 1, 0.08,  0, 0, 0, 0.12 }, gl[] = { 0, 0.5, 1 }; gradient(c, b.origin, CGPointMake(b.origin.x, CGRectGetMaxY(b)), 3, g, gl);
+    CGContextRestoreGState(c); stroke(c, 0, 0, 0, 0.25, 0.5); CGContextAddPath(c, track); CGContextStrokePath(c); CGPathRelease(track);
+    CGFloat w = (r.size.width - 28) / 4; char buf[48];
+    for (int k = 0; k < 4; k++) {
+        CGFloat lx = r.origin.x + 14 + w * k; fill(c, col[k][0], col[k][1], col[k][2], 1); CGContextFillEllipseInRect(c, CGRectMake(lx, r.origin.y + 69, 8, 8));
+        snprintf(buf, sizeof buf, "%d", d->states[k]); text(c, buf, HELV_BOLD, 13, TITLE, 0, lx + 12, r.origin.y + 77, 0, 0); text(c, names[k], HELV, 11, CAPTION, 0, lx + 12, r.origin.y + 91, w - 14, 0);
+    }
+}
+
+#pragma mark - the tab bar
+
+void CDDrawTabIcon(CGContextRef c, CGRect r, int which) {   // 30x30 points of white for the bar to tint; alpha is all that counts
+    CGFloat x = r.origin.x, y = r.origin.y; fill(c, 1, 1, 1, 1); stroke(c, 1, 1, 1, 1, 2);
+    if (which == 0) {   // two index cards, one behind the other
+        CGContextSaveGState(c); CGContextTranslateCTM(c, x + 17, y + 11); CGContextRotateCTM(c, -10 * M_PI / 180);
+        CGPathRef back = rounded(CGRectMake(-10, -6.5, 20, 13), 1.5); CGContextAddPath(c, back); CGContextStrokePath(c); CGPathRelease(back); CGContextRestoreGState(c);
+        CGPathRef front = rounded(CGRectMake(x + 3, y + 11, 21, 14), 1.5); CGContextSetBlendMode(c, kCGBlendModeClear); CGContextAddPath(c, front); CGContextSetLineWidth(c, 4); CGContextStrokePath(c);   // a gap around the front card
+        CGContextSetBlendMode(c, kCGBlendModeNormal); fillPath(c, front); CGPathRelease(front);
+        CGContextSetBlendMode(c, kCGBlendModeClear); for (int i = 0; i < 3; i++) CGContextFillRect(c, CGRectMake(x + 6, y + 15.5 + i * 3, 15, 1)); CGContextSetBlendMode(c, kCGBlendModeNormal);   // its rules, cut out
+    } else {   // a bar chart
+        static const CGFloat h[4] = { 9, 16, 12, 22 };
+        for (int i = 0; i < 4; i++) CGContextFillRect(c, CGRectMake(x + 3.5 + i * 6.5, y + 26 - h[i], 4.5, h[i]));
+        CGContextFillRect(c, CGRectMake(x + 2, y + 27, 26, 1.5));
+    }
+}
+void CDDrawTabBar(CGContextRef c, CGRect r) {   // iOS 5's black bar: a lit upper half over a darker lower one
+    CGFloat top[] = { 0.26, 0.26, 0.26, 1,  0.16, 0.16, 0.16, 1 }, bottom[] = { 0.09, 0.09, 0.09, 1,  0.04, 0.04, 0.04, 1 }, l[] = { 0, 1 };
+    CGContextSaveGState(c); CGContextClipToRect(c, CGRectMake(r.origin.x, r.origin.y, r.size.width, r.size.height / 2)); gradient(c, r.origin, CGPointMake(r.origin.x, r.origin.y + r.size.height / 2), 2, top, l); CGContextRestoreGState(c);
+    CGContextSaveGState(c); CGContextClipToRect(c, CGRectMake(r.origin.x, r.origin.y + r.size.height / 2, r.size.width, r.size.height / 2)); gradient(c, CGPointMake(r.origin.x, r.origin.y + r.size.height / 2), CGPointMake(r.origin.x, CGRectGetMaxY(r)), 2, bottom, l); CGContextRestoreGState(c);
+    fill(c, 0.05, 0.05, 0.05, 1); CGContextFillRect(c, CGRectMake(r.origin.x, r.origin.y, r.size.width, 0.5)); fill(c, 0.36, 0.36, 0.36, 1); CGContextFillRect(c, CGRectMake(r.origin.x, r.origin.y + 0.5, r.size.width, 0.5));
 }

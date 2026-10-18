@@ -18,5 +18,11 @@ int main(void) {
     for (NSString *d in [s decks]) { CDCounts n = [s countsForDeck:d]; printf("deck %s|%ld %ld %ld\n", [d UTF8String], (long)n.fresh, (long)n.learning, (long)n.due); }
     long long w; NSInteger next = [s nextCardInDeck:nil wait:&w];
     printf("today %ld\nnext %s\n", (long)[s answersToday], next >= 0 ? [[[s card:next] objectForKey:@"id"] UTF8String] : "-");
+    NSDictionary *st = [s statsSummary]; NSMutableString *line = [NSMutableString stringWithString:@"charts"];   // the Stats tab's numbers, flattened
+    for (NSArray *d in [st objectForKey:@"answers"]) for (NSNumber *n in d) [line appendFormat:@" %@", n];
+    for (NSNumber *n in [st objectForKey:@"forecast"]) [line appendFormat:@" %@", n];
+    for (NSArray *w in [st objectForKey:@"weeks"]) for (NSNumber *n in w) [line appendFormat:@" %@", n];
+    for (NSString *k in [NSArray arrayWithObjects:@"cardsNew", @"cardsLearning", @"cardsYoung", @"cardsMature", @"answersToday", @"newToday", @"minutesToday", @"streak", @"retention", @"reviews30", nil]) [line appendFormat:@" %@", [st objectForKey:k]];
+    printf("%s\n", [line UTF8String]);
     [p release]; return 0;
 }

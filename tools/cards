@@ -403,7 +403,7 @@ def replay(cards, entries, settings, now=None):
     states = [Card() for _ in cards]
     undone = set(e["u"] for e in entries.values() if "u" in e)
     info = {"today": today, "offset": offset, "now": now, "new": {}, "rev": {}, "notes": set(), "reviews": 0, "ms": 0,
-            "days": set(), "ret": [0, 0]}
+            "days": set(), "ret": [0, 0], "byday": {}, "weeks": {}}   # byday: day -> answers by rating; weeks: weeks back -> [remembered, reviewed]
     for e in ordered(entries):
         if "u" in e or e["id"] in undone or e.get("c") not in index or e.get("r") not in (1, 2, 3, 4):
             continue
@@ -411,14 +411,47 @@ def replay(cards, entries, settings, now=None):
         d = day(e["t"], e.get("o", 0))
         prev = answer(states[i], e["t"], e.get("o", 0), e["r"], retention, seed(e["id"]))
         info["days"].add(d)
+        info["byday"].setdefault(d, [0, 0, 0, 0])[e["r"] - 1] += 1
         if prev == REVIEW and d > today - 30:
             info["ret"][0] += 1; info["ret"][1] += e["r"] > 1
+        if prev == REVIEW and d <= today and (today - d) // 7 < 12:
+            w = info["weeks"].setdefault((today - d) // 7, [0, 0]); w[0] += e["r"] > 1; w[1] += 1
         if d == today:
             info["reviews"] += 1; info["ms"] += e.get("ms", 0); info["notes"].add(c["note"])
             key = "new" if prev == NEW else "rev" if prev == REVIEW else None
             if key:
                 info[key][c["deck"]] = info[key].get(c["deck"], 0) + 1
     return states, info
+
+
+def percent(part, whole):
+    return int(100.0 * part / whole + 0.5) if whole else -1   # rounded half up, as the app does
+
+
+def streak(info):
+    n, d = 0, info["today"] if info["today"] in info["days"] else info["today"] - 1
+    while d in info["days"]:
+        n += 1; d -= 1
+    return n
+
+
+def chart_data(cards, states, info):
+    """Everything the app's Stats tab draws, in its order: the last 30 days' answers by rating (oldest first), reviews
+    due over the next 30 days (today's includes anything overdue), retention for each of the last 12 weeks (oldest
+    first, [remembered, reviewed]), and the cards by state."""
+    today = info["today"]
+    forecast = [0] * 30
+    for s in states:
+        if s.state == REVIEW and s.due_day - today < 30:
+            forecast[max(0, s.due_day - today)] += 1
+    mature = len([s for s in states if s.state == REVIEW and s.due_day - s.last_day >= 21])
+    by = [len([s for s in states if s.state == k]) for k in range(4)]
+    total, ok = info["ret"]
+    return {"answers": [info["byday"].get(today - 29 + k, [0, 0, 0, 0]) for k in range(30)], "forecast": forecast,
+            "weeks": [info["weeks"].get(11 - k, [0, 0]) for k in range(12)],
+            "states": {"new": by[NEW], "learning": by[LEARNING] + by[RELEARNING], "young": by[REVIEW] - mature, "mature": mature},
+            "today": {"answers": info["reviews"], "new": sum(info["new"].values()), "minutes": (info["ms"] + 30000) // 60000},
+            "streak": streak(info), "retention": percent(ok, total), "reviews30": total}
 
 
 def deck_counts(cards, states, info, settings, deck):
@@ -600,6 +633,9 @@ def cmd_stats(root, args):
             entries = read_log(f.read())[0]
     cards = pushed["cards"]
     states, info = replay(cards, entries, settings, args.now)
+    charts = chart_data(cards, states, info)
+    if args.json:
+        print(json.dumps(charts, indent=1)); return 0
     ago = int(info["now"] - pushed["synced"])
     print("as of the last sync, %s (%s)\n" % (time.strftime("%b %-d %H:%M", time.localtime(pushed["synced"])), span(ago) + " ago"))
     width = max([len(d) for d in pushed["decks"]] + [5])
@@ -619,11 +655,14 @@ def cmd_stats(root, args):
     print("today      %d answer%s, %d new card%s, %s" % (info["reviews"], "s"[info["reviews"] == 1:], sum(info["new"].values()),
                                                      "s"[sum(info["new"].values()) == 1:], span(info["ms"] // 1000)))
     total, ok = info["ret"]
-    print("retention  %s" % ("%d%% of %d review%s in the last 30 days" % (round(100.0 * ok / total), total, "s"[total == 1:]) if total else "no reviews of graduated cards yet"))
-    streak, d = 0, info["today"] if info["today"] in info["days"] else info["today"] - 1
-    while d in info["days"]:
-        streak += 1; d -= 1
-    print("streak     %d day%s" % (streak, "s"[streak == 1:]))
+    print("retention  %s" % ("%d%% of %d review%s in the last 30 days" % (percent(ok, total), total, "s"[total == 1:]) if total else "no reviews of graduated cards yet"))
+    weeks = ["%s %d%% (%d)" % (time.strftime("%b %-d", time.localtime((info["today"] - 7 * (11 - k) - 6) * 86400 + ROLLOVER - info["offset"] + 43200)), percent(*w), w[1])
+             for k, w in enumerate(charts["weeks"]) if w[1]]
+    print("by week    %s" % ("  ".join(weeks) if weeks else "nothing yet"))
+    print("streak     %d day%s" % (charts["streak"], "s"[charts["streak"] == 1:]))
+    a = [sum(x[r] for x in charts["answers"]) for r in range(4)]
+    print("30 days    %d answers: %d again, %d hard, %d good, %d easy" % ((sum(a),) + tuple(a)))
+    print("coming     %d reviews in the next 30 days, %d of them today" % (sum(charts["forecast"]), charts["forecast"][0]))
     week = []
     for k in range(1, 8):
         t = (info["today"] + k) * 86400 + ROLLOVER - info["offset"] + 43200
@@ -659,6 +698,7 @@ def main():
     s = sub.add_parser("sync", help="send the cards to the iPod, back up its review log")
     s.add_argument("--host", help="sync over Wi-Fi to this address instead of USB")
     t = sub.add_parser("stats", help="what is due, as of the last sync")
+    t.add_argument("--json", action="store_true", help="the numbers behind the app's Stats charts, as JSON")
     t.add_argument("--now", type=int, help=argparse.SUPPRESS)
     args = ap.parse_args()
     if not args.cmd:

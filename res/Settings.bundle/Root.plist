@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>PreferenceSpecifiers</key>
+	<array>
+		<dict>
+			<key>Title</key>
+			<string>Each Day, Per Deck</string>
+			<key>FooterText</key>
+			<string>New cards come in the order they're written in the deck's file.</string>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSMultiValueSpecifier</string>
+			<key>Title</key>
+			<string>New Cards</string>
+			<key>Key</key>
+			<string>cd_new_per_day</string>
+			<key>DefaultValue</key>
+			<integer>20</integer>
+			<key>Titles</key>
+			<array><string>None</string><string>5</string><string>10</string><string>15</string><string>20</string><string>30</string><string>50</string><string>100</string></array>
+			<key>Values</key>
+			<array><integer>0</integer><integer>5</integer><integer>10</integer><integer>15</integer><integer>20</integer><integer>30</integer><integer>50</integer><integer>100</integer></array>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSMultiValueSpecifier</string>
+			<key>Title</key>
+			<string>Reviews</string>
+			<key>Key</key>
+			<string>cd_max_reviews</string>
+			<key>DefaultValue</key>
+			<integer>200</integer>
+			<key>Titles</key>
+			<array><string>50</string><string>100</string><string>200</string><string>500</string><string>No Limit</string></array>
+			<key>Values</key>
+			<array><integer>50</integer><integer>100</integer><integer>200</integer><integer>500</integer><integer>99999</integer></array>
+		</dict>
+		<dict>
+			<key>Title</key>
+			<string>Scheduling</string>
+			<key>FooterText</key>
+			<string>How sure you want to be of remembering a card when it comes back. Higher means shorter gaps and more reviews. FSRS recommends 90%.</string>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSMultiValueSpecifier</string>
+			<key>Title</key>
+			<string>Retention</string>
+			<key>Key</key>
+			<string>cd_retention</string>
+			<key>DefaultValue</key>
+			<real>0.9</real>
+			<key>Titles</key>
+			<array><string>80%</string><string>85%</string><string>90%</string><string>95%</string></array>
+			<key>Values</key>
+			<array><real>0.8</real><real>0.85</real><real>0.9</real><real>0.95</real></array>
+		</dict>
+		<dict>
+			<key>Title</key>
+			<string>About</string>
+			<key>FooterText</key>
+			<string>Flashcards written in Markdown on the Mac and sent over with the cards script. Scheduling is FSRS-5.</string>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+		</dict>
+		<dict>
+			<key>DefaultValue</key>
+			<string>1.0</string>
+			<key>Key</key>
+			<string>cd_version</string>
+			<key>Title</key>
+			<string>Version</string>
+			<key>Type</key>
+			<string>PSTitleValueSpecifier</string>
+		</dict>
+	</array>
+	<key>StringsTable</key>
+	<string>Root</string>
+</dict>
+</plist>

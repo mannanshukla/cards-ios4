@@ -1,0 +1,673 @@
+#!/usr/bin/env python3
+"""cards: Markdown flashcards for the Cards app on the iPod touch.
+
+  cards check   parse the cards, list decks and counts, point out problems
+  cards sync    push the cards to the iPod and back up its review log
+  cards stats   what is due and how reviews are going, as of the last sync
+
+Cards live in Markdown files under ~/Cards (or $CARDS_DIR, or --dir). Each file
+is a deck named by its path: Japanese/N5.md is the deck "Japanese/N5". The
+formats are the ones Obsidian's Spaced Repetition plugin uses:
+
+  front::back      one card
+  front:::back     two cards, one each way
+  front            a multi-line card: the lines before a lone ? are the front,
+  ?                the lines after it the back, up to the next blank line
+  back             (a lone ?? makes it both ways)
+
+Bold, italics, `code`, lists and line breaks carry over, and furigana is
+written Anki-style: 漢字[かんじ]. Editing a card's back keeps its history;
+editing the front starts it over.
+
+Scheduling (FSRS-5) happens on the iPod, which keeps an append-only log of
+every answer. Each sync copies that log to DIR/.cards/reviews.jsonl and puts
+back anything the iPod is missing, so a reinstall loses nothing.
+"""
+import argparse, hashlib, html, json, math, os, plistlib, re, socket, subprocess, sys, time, unicodedata
+
+KIT = os.path.expanduser("~/Legacy-iOS-Kit/bin/macos")
+BUNDLE = "com.mshukla.cards"
+DEFAULTS = {"cd_new_per_day": 20, "cd_max_reviews": 200, "cd_retention": 0.9}
+
+# ---------------------------------------------------------------- Markdown
+
+CJK = re.compile(r"[々〆぀-ヿ㐀-䶿一-鿿豈-﫿]")
+KANJI = re.compile(r"[々〆ヶ㐀-䶿一-鿿豈-﫿]")
+SEP = re.compile(r"^\s*(\?\??)\s*$")
+HEADING = re.compile(r"^\s{0,3}#{1,6}\s")
+TAGS = re.compile(r"^\s*(#[^\s#]+\s*)+$")
+LIST = re.compile(r"^\s*(?:[-*+]|(\d+)[.)])\s+(.*)$")
+BLOCK_TAGS = re.compile(r"</?(p|br|li|ul|ol|pre|div|blockquote)\b[^>]*>", re.I)
+
+
+def furigana(s):
+    """漢字[かんじ] -> <ruby>. The base is the run of kanji before the bracket, or
+    the whole word after a space (Anki's ' 日本語[にほんご]'), and must end in a CJK
+    character so that code like a[i] is left alone."""
+    out, last = [], 0
+    for m in re.finditer(r"\[([^\[\]]+)\](?!\()", s):
+        pre = s[last:m.start()]
+        i = len(pre)
+        while i > 0 and not pre[i - 1].isspace() and pre[i - 1] not in "[]<>;":
+            i -= 1
+        run = pre[i:]
+        if not run or not CJK.match(run[-1]):
+            out.append(s[last:m.end()]); last = m.end(); continue
+        spaced = i > 1 and pre[i - 1] == " " and CJK.match(pre[i - 2])   # a space between Japanese words is only a delimiter
+        if not spaced and KANJI.match(run[-1]):
+            j = len(run)
+            while j > 0 and KANJI.match(run[j - 1]):
+                j -= 1
+            keep, base = pre[:i] + run[:j], run[j:]
+        else:
+            keep, base = (pre[:i - 1] if spaced else pre[:i]), run
+        out.append("%s<ruby>%s<rt>%s</rt></ruby>" % (keep, base, m.group(1).strip()))
+        last = m.end()
+    out.append(s[last:])
+    return "".join(out)
+
+
+def _text(s):
+    s = html.escape(s, quote=False)
+    s = re.sub(r"&lt;br\s*/?&gt;", "<br>", s, flags=re.I)
+    s = re.sub(r"!\[([^\]]*)\]\([^)]*\)", r"\1", s)                    # images: the alt text
+    s = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"<u>\1</u>", s)              # links: the text
+    s = re.sub(r"\[\[(?:[^\]|]+\|)?([^\]]+)\]\]", r"\1", s)             # [[wiki links]]
+    s = furigana(s)
+    s = re.sub(r"\*\*(.+?)\*\*|__(.+?)__", lambda m: "<b>%s</b>" % (m.group(1) or m.group(2)), s)
+    s = re.sub(r"(?<!\*)\*(?![\s*])(.+?)(?<![\s*])\*(?!\*)", r"<i>\1</i>", s)
+    s = re.sub(r"(?<![A-Za-z0-9_])_(?![\s_])(.+?)(?<![\s_])_(?![A-Za-z0-9_])", r"<i>\1</i>", s)
+    s = re.sub(r"~~(.+?)~~", r"<s>\1</s>", s)
+    s = re.sub(r"==(.+?)==", r"<mark>\1</mark>", s)
+    return s
+
+
+def inline(s):
+    out, last = [], 0
+    for m in re.finditer(r"(`+)(.+?)\1", s):
+        out.append(_text(s[last:m.start()]))
+        out.append("<code>%s</code>" % html.escape(m.group(2).strip(), quote=False))
+        last = m.end()
+    out.append(_text(s[last:]))
+    return "".join(out)
+
+
+def render(lines):
+    """Markdown lines -> the HTML for one face of a card."""
+    blocks, para, items, kind = [], [], [], [None]
+
+    def flush():
+        if para:
+            blocks.append("<p>%s</p>" % "<br>".join(inline(x) for x in para)); del para[:]
+        if items:
+            blocks.append("<%s>%s</%s>" % (kind[0], "".join("<li>%s</li>" % inline(x) for x in items), kind[0])); del items[:]
+
+    i = 0
+    while i < len(lines):
+        line = lines[i].rstrip(); s = line.strip()
+        if s.startswith(("```", "~~~")):
+            flush(); fence, code = s[:3], []
+            i += 1
+            while i < len(lines) and not lines[i].strip().startswith(fence):
+                code.append(lines[i].rstrip()); i += 1
+            blocks.append("<pre>%s</pre>" % html.escape("\n".join(code), quote=False))
+        elif LIST.match(line):
+            m = LIST.match(line); k = "ol" if m.group(1) else "ul"
+            if para or (items and kind[0] != k):
+                flush()
+            kind[0] = k; items.append(m.group(2))
+        elif HEADING.match(line):
+            flush(); blocks.append("<p><b>%s</b></p>" % inline(s.lstrip("#").strip()))
+        elif s.startswith(">"):
+            flush(); blocks.append("<blockquote>%s</blockquote>" % inline(s[1:].strip()))
+        elif s:
+            if items:
+                flush()
+            para.append(s)
+        i += 1
+    flush()
+    body = "".join(blocks)
+    text = plain(body)
+    if len(text) <= 12 and len(blocks) == 1 and "<br>" not in body and blocks[0].startswith("<p>"):
+        return '<div class="big">%s</div>' % body
+    return body
+
+
+def plain(h):
+    """What a face says, without markup or furigana readings: the basis of a card's id."""
+    h = re.sub(r"<rt>.*?</rt>", "", h)
+    h = BLOCK_TAGS.sub(" ", h)
+    h = re.sub(r"<[^>]+>", "", h)
+    return " ".join(html.unescape(h).split())
+
+
+def split_inline(line):
+    """front::back or front:::back, ignoring :: inside `code`."""
+    tick = False
+    for i, c in enumerate(line):
+        if c == "`":
+            tick = not tick
+        elif not tick and line.startswith("::", i):
+            both = line.startswith(":::", i)
+            return line[:i], line[i + (3 if both else 2):], both
+    return None
+
+
+def read_deck(path):
+    """Returns ([(line, front lines, back lines, both ways)], [(line, problem)])."""
+    with open(path, encoding="utf-8", errors="replace") as f:
+        text = unicodedata.normalize("NFC", f.read()).replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"<!--.*?-->", lambda m: "\n" * m.group(0).count("\n"), text, flags=re.S)
+    lines = text.split("\n")
+    start = 0
+    if lines and lines[0].strip() == "---":   # front matter
+        for k in range(1, len(lines)):
+            if lines[k].strip() in ("---", "..."):
+                start = k + 1; break
+    paras, cur, fence = [], [], None
+    for n in range(start, len(lines)):
+        line = lines[n]; s = line.strip()
+        if fence:
+            cur.append((n + 1, line))
+            if s.startswith(fence):
+                fence = None
+        elif s.startswith(("```", "~~~")):
+            fence = s[:3]; cur.append((n + 1, line))
+        elif not s:
+            if cur:
+                paras.append(cur); cur = []
+        else:
+            cur.append((n + 1, line))
+    if cur:
+        paras.append(cur)
+    notes, problems = [], []
+    for p in paras:
+        seps = [k for k, (_, line) in enumerate(p) if SEP.match(line)]
+        if seps:
+            k = seps[0]; both = SEP.match(p[k][1]).group(1) == "??"
+            q, a = [line for _, line in p[:k]], [line for _, line in p[k + 1:]]
+            while len(q) > 1 and (HEADING.match(q[0]) or TAGS.match(q[0])):   # a heading above the card is context, not question
+                q.pop(0)
+            if not q or not any(x.strip() for x in a):
+                problems.append((p[k][0], "a lone %s with nothing %s it" % (p[k][1].strip(), "before" if not q else "after")))
+                continue
+            notes.append((p[0][0], q, a, both))
+            continue
+        for n, line in p:
+            if HEADING.match(line) or TAGS.match(line):
+                continue
+            m = split_inline(line)
+            if not m:
+                continue
+            q, a, both = m
+            if not q.strip() or not a.strip():
+                problems.append((n, "%s with nothing on one side" % (":::" if both else "::")))
+                continue
+            notes.append((n, [q.strip()], [a.strip()], both))
+    return notes, problems
+
+
+def card_id(direction, front_html, salt=""):
+    return hashlib.sha1(("%s\0%s%s" % (direction, plain(front_html), salt)).encode("utf-8")).hexdigest()[:12]
+
+
+def load_cards(root):
+    """Every deck under root -> (deck names, cards, problems)."""
+    decks, cards, problems, seen = [], [], [], {}
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(d for d in dirnames if not d.startswith((".", "_")))
+        for fn in sorted(filenames):
+            if not fn.lower().endswith(".md") or fn.startswith("."):
+                continue
+            path = os.path.join(dirpath, fn); rel = os.path.relpath(path, root)
+            deck = rel[:-3].replace(os.sep, "/")
+            notes, probs = read_deck(path)
+            problems += [("%s:%d" % (rel, n), msg) for n, msg in probs]
+            if not notes:
+                continue
+            decks.append(deck)
+            for n, q, a, both in notes:
+                fq, fa = render(q), render(a)
+                src = "%s:%d" % (rel, n)
+                faces = [("f", fq, fa)] + ([("r", fa, fq)] if both else [])
+                note = None
+                for direction, front, back in faces:
+                    cid, k = card_id(direction, front), 1
+                    if cid in seen:
+                        problems.append((src, "same front as %s, so they share a name: %s" % (seen[cid], plain(front)[:40])))
+                    while cid in seen:
+                        k += 1; cid = card_id(direction, front, "#%d" % k)
+                    seen[cid] = src
+                    note = note or cid
+                    cards.append({"id": cid, "deck": deck, "note": note, "front": front, "back": back, "src": src})
+    return decks, cards, problems
+
+# ---------------------------------------------------------------- FSRS-5
+# Mirrors src/CDFSRS.c in the app line for line; tests/crosscheck.py holds them to the same numbers.
+
+W = (0.40255, 1.18385, 3.173, 15.69105, 7.1949, 0.5345, 1.4604, 0.0046, 1.54575, 0.1192, 1.01925,
+     1.9395, 0.11, 0.29605, 2.2698, 0.2315, 2.9898, 0.51655, 0.6621)
+DECAY, FACTOR = -0.5, 19.0 / 81.0
+LEARN_STEPS, RELEARN_STEPS = (60, 600), (600,)
+MAX_IVL, ROLLOVER = 36500, 4 * 3600
+NEW, LEARNING, REVIEW, RELEARNING = range(4)
+
+
+class Card(object):
+    __slots__ = ("state", "step", "reps", "lapses", "s", "d", "last_t", "due_t", "last_day", "due_day")
+
+    def __init__(self):
+        self.state = self.step = self.reps = self.lapses = 0
+        self.s = self.d = 0.0
+        self.last_t = self.due_t = self.last_day = self.due_day = 0
+
+    def copy(self):
+        c = Card()
+        for k in Card.__slots__:
+            setattr(c, k, getattr(self, k))
+        return c
+
+
+def day(t, offset):
+    """Days since 1970 in local time, turning over at 4 am."""
+    return (t + offset - ROLLOVER) // 86400
+
+
+def init_d(r):
+    return W[4] - math.exp(W[5] * (r - 1)) + 1
+
+
+def clamp_d(d):
+    return min(max(d, 1.0), 10.0)
+
+
+def next_d(d, r):
+    d2 = d + (-W[6] * (r - 3)) * (10.0 - d) / 9.0
+    return clamp_d(W[7] * init_d(4) + (1 - W[7]) * d2)
+
+
+def retrievability(elapsed, s):
+    return math.pow(1 + FACTOR * elapsed / s, DECAY)
+
+
+def recall_s(d, s, R, r):
+    return s * (1 + math.exp(W[8]) * (11 - d) * math.pow(s, -W[9]) * (math.exp((1 - R) * W[10]) - 1)
+                * (W[15] if r == 2 else 1) * (W[16] if r == 4 else 1))
+
+
+def forget_s(d, s, R):
+    return min(W[11] * math.pow(d, -W[12]) * (math.pow(s + 1, W[13]) - 1) * math.exp((1 - R) * W[14]),
+               s / math.exp(W[17] * W[18]))
+
+
+def interval(s, retention):
+    ivl = math.floor(s / FACTOR * (math.pow(retention, 1 / DECAY) - 1) + 0.5)
+    return int(min(max(ivl, 1), MAX_IVL))
+
+
+def fuzz(ivl, seed):
+    if ivl < 2.5 or seed < 0:
+        return ivl
+    delta = 1.0
+    for start, end, f in ((2.5, 7.0, 0.15), (7.0, 20.0, 0.1), (20.0, 1e9, 0.05)):
+        delta += f * max(min(ivl, end) - start, 0.0)
+    lo = max(2, int(math.floor(ivl - delta + 0.5)))
+    hi = min(int(math.floor(ivl + delta + 0.5)), MAX_IVL)
+    lo = min(lo, hi)
+    return min(int(math.floor(seed * (hi - lo + 1) + lo)), hi)
+
+
+def seed(review_id):
+    """FNV-1a of the review's id as a fraction: the same 'random' fuzz every time the log is replayed."""
+    h = 2166136261
+    for b in review_id.encode("utf-8"):
+        h = ((h ^ b) * 16777619) & 0xFFFFFFFF
+    return h / 4294967296.0
+
+
+def answer(c, t, offset, r, retention, fz):
+    """Rate card c (1 Again, 2 Hard, 3 Good, 4 Easy) at unix time t. Returns the state it was in."""
+    prev, today = c.state, day(t, offset)
+    elapsed = today - c.last_day
+    if c.state == NEW:
+        c.s, c.d, c.state, c.step = W[r - 1], clamp_d(init_d(r)), LEARNING, 0
+    elif elapsed < 1:
+        c.s, c.d = c.s * math.exp(W[17] * (r - 3 + W[18])), next_d(c.d, r)
+    else:
+        R = retrievability(elapsed, c.s)
+        c.s, c.d = (forget_s(c.d, c.s, R) if r == 1 else recall_s(c.d, c.s, R, r)), next_d(c.d, r)
+    c.s = max(c.s, 0.01)
+    secs = -1   # a learning step, or -1 for a whole-day interval
+    if c.state in (LEARNING, RELEARNING):
+        steps = LEARN_STEPS if c.state == LEARNING else RELEARN_STEPS
+        if r == 1:
+            c.step = 0; secs = steps[0]
+        elif r == 2:
+            if c.step == 0:
+                secs = int(steps[0] * 1.5) if len(steps) == 1 else (steps[0] + steps[1]) // 2
+            else:
+                secs = steps[min(c.step, len(steps) - 1)]
+        elif r == 3 and c.step + 1 < len(steps):
+            c.step += 1; secs = steps[c.step]
+    elif r == 1:
+        c.lapses += 1; c.state, c.step = RELEARNING, 0; secs = RELEARN_STEPS[0]
+    if secs < 0:
+        c.state, c.step = REVIEW, 0
+        c.due_day = today + fuzz(interval(c.s, retention), fz)
+        c.due_t = 0
+    else:
+        c.due_t = t + secs
+    c.reps += 1; c.last_day = today; c.last_t = t
+    return prev
+
+
+def preview(c, t, offset, r, retention):
+    """(amount, is_days) for the interval rating r would give, without fuzz."""
+    x = c.copy(); answer(x, t, offset, r, retention, -1)
+    return (x.due_day - day(t, offset), True) if x.state == REVIEW else (x.due_t - t, False)
+
+# ---------------------------------------------------------------- the log
+
+def read_log(text):
+    entries, bad = {}, 0
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            e = json.loads(line)
+        except ValueError:
+            bad += 1; continue
+        if isinstance(e, dict) and isinstance(e.get("id"), str):
+            entries.setdefault(e["id"], e)
+        else:
+            bad += 1
+    return entries, bad
+
+
+def log_line(e):
+    return json.dumps(e, ensure_ascii=False, separators=(",", ":"))
+
+
+def ordered(entries):
+    return sorted(entries.values(), key=lambda e: (e.get("t", 0), e["id"]))
+
+
+def replay(cards, entries, settings, now=None):
+    """Rebuild every card's schedule from the log, as the app does. Returns (states, today info)."""
+    now = int(now if now is not None else time.time())
+    offset = time.localtime(now).tm_gmtoff
+    today = day(now, offset)
+    retention = float(settings.get("cd_retention", 0.9))
+    index = dict((c["id"], i) for i, c in enumerate(cards))
+    states = [Card() for _ in cards]
+    undone = set(e["u"] for e in entries.values() if "u" in e)
+    info = {"today": today, "offset": offset, "now": now, "new": {}, "rev": {}, "notes": set(), "reviews": 0, "ms": 0,
+            "days": set(), "ret": [0, 0]}
+    for e in ordered(entries):
+        if "u" in e or e["id"] in undone or e.get("c") not in index or e.get("r") not in (1, 2, 3, 4):
+            continue
+        i = index[e["c"]]; c = cards[i]
+        d = day(e["t"], e.get("o", 0))
+        prev = answer(states[i], e["t"], e.get("o", 0), e["r"], retention, seed(e["id"]))
+        info["days"].add(d)
+        if prev == REVIEW and d > today - 30:
+            info["ret"][0] += 1; info["ret"][1] += e["r"] > 1
+        if d == today:
+            info["reviews"] += 1; info["ms"] += e.get("ms", 0); info["notes"].add(c["note"])
+            key = "new" if prev == NEW else "rev" if prev == REVIEW else None
+            if key:
+                info[key][c["deck"]] = info[key].get(c["deck"], 0) + 1
+    return states, info
+
+
+def deck_counts(cards, states, info, settings, deck):
+    """(new, learning, due) the way the app's deck list shows them."""
+    new_limit, rev_limit = int(settings.get("cd_new_per_day", 20)), int(settings.get("cd_max_reviews", 200))
+    end = (info["today"] + 1) * 86400 + ROLLOVER - info["offset"]
+    n = learn = due = 0
+    for c, s in zip(cards, states):
+        if c["deck"] != deck:
+            continue
+        if s.state in (LEARNING, RELEARNING) and s.due_t < end:
+            learn += 1
+        elif c["note"] in info["notes"] and s.state in (NEW, REVIEW):
+            continue   # a sibling was answered today; it waits for tomorrow
+        elif s.state == NEW:
+            n += 1
+        elif s.state == REVIEW and s.due_day <= info["today"]:
+            due += 1
+    n = max(0, min(n, new_limit - info["new"].get(deck, 0)))
+    due = max(0, min(due, rev_limit - info["rev"].get(deck, 0)))
+    return n, learn, due
+
+# ---------------------------------------------------------------- the iPod
+
+class Device(object):
+    def __init__(self, host=None):
+        self.host, self.port = (host, 22) if host else ("127.0.0.1", 2222)
+        self.usb = not host
+        self.password = os.environ.get("CARDS_SSH_PASSWORD", "alpine")
+        self.container = None
+
+    def ensure_usb(self):
+        if not self.usb or port_open(2222):
+            return
+        iproxy = os.path.join(KIT, "iproxy")
+        subprocess.Popen([iproxy, "2222", "22"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        for _ in range(30):
+            if port_open(2222):
+                return
+            time.sleep(0.1)
+        die("couldn't start iproxy on port 2222")
+
+    def ssh(self, cmd, data=None):
+        sshpass = os.path.join(KIT, "sshpass")
+        opts = ["-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR",
+                "-o", "HostKeyAlgorithms=+ssh-rsa", "-o", "KexAlgorithms=+diffie-hellman-group1-sha1,diffie-hellman-group14-sha1",
+                "-o", "Ciphers=+aes128-cbc,3des-cbc", "-o", "MACs=+hmac-sha1", "-o", "ConnectTimeout=8",
+                "-o", "PreferredAuthentications=password,keyboard-interactive", "-o", "PubkeyAuthentication=no"]
+        p = subprocess.run([sshpass if os.path.exists(sshpass) else "sshpass", "-p", self.password, "ssh"] + opts +
+                           ["-p", str(self.port), "root@%s" % self.host, cmd], input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if p.returncode == 255 or (p.returncode and not p.stdout and b"Connection" in p.stderr):
+            die("the iPod isn't answering over %s (%s). Is it plugged in and awake?"
+                % ("USB" if self.usb else self.host, p.stderr.decode(errors="replace").strip() or "ssh failed"))
+        if p.returncode:
+            die("on the iPod: %s" % p.stderr.decode(errors="replace").strip())
+        return p.stdout
+
+    def locate(self):
+        out = self.ssh("for d in /var/mobile/Applications/*/Cards.app; do [ -d \"$d\" ] && dirname \"$d\"; done; true").decode().split()
+        if not out:
+            die("Cards isn't installed on the iPod")
+        self.container = out[0]
+        return self.container
+
+    def docs(self, name=""):
+        return "%s/Documents/%s" % (self.container, name)
+
+
+def port_open(port):
+    try:
+        socket.create_connection(("127.0.0.1", port), 0.3).close()
+        return True
+    except OSError:
+        return False
+
+
+def die(msg):
+    sys.stderr.write("cards: %s\n" % msg)
+    sys.exit(1)
+
+
+def write_atomic(path, data):
+    tmp = path + ".tmp"
+    with open(tmp, "wb") as f:
+        f.write(data); f.flush(); os.fsync(f.fileno())
+    os.replace(tmp, path)
+
+
+def computer_name():
+    try:
+        return subprocess.run(["scutil", "--get", "ComputerName"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL).stdout.decode().strip() or socket.gethostname()
+    except OSError:
+        return socket.gethostname()
+
+# ---------------------------------------------------------------- commands
+
+def cmd_check(root, args):
+    decks, cards, problems = load_cards(root)
+    both = len([c for c in cards if c["id"] != c["note"]])
+    print("%s: %d deck%s, %d card%s%s" % (tilde(root), len(decks), "s"[len(decks) == 1:], len(cards), "s"[len(cards) == 1:],
+                                         " (%d of them reversed)" % both if both else ""))
+    width = max([len(d) for d in decks] + [4])
+    for d in decks:
+        print("  %-*s %5d" % (width, d, len([c for c in cards if c["deck"] == d])))
+    if problems:
+        print("\n%d problem%s:" % (len(problems), "s"[len(problems) == 1:]))
+        for where, msg in problems:
+            print("  %s  %s" % (where, msg))
+    if args.show:
+        for c in cards:
+            if args.show in (c["deck"], c["id"], "all"):
+                print("\n[%s] %s  %s\n  front: %s\n  back:  %s" % (c["id"], c["deck"], c["src"], c["front"], c["back"]))
+    return 1 if problems and args.strict else 0
+
+
+def cmd_sync(root, args):
+    decks, cards, problems = load_cards(root)
+    if not cards:
+        die("no cards in %s, so nothing was sent. Write some first (cards check shows what it finds)" % tilde(root))
+    state = os.path.join(root, ".cards"); os.makedirs(state, exist_ok=True)
+    dev = Device(args.host); dev.ensure_usb(); dev.locate()
+    # 1. the iPod's log, merged into the backup here
+    device_log, bad = read_log(dev.ssh("cat '%s' 2>/dev/null; true" % dev.docs("reviews.jsonl")).decode("utf-8", "replace"))
+    backup_path = os.path.join(state, "reviews.jsonl")
+    backup = {}
+    if os.path.exists(backup_path):
+        with open(backup_path, encoding="utf-8") as f:
+            backup = read_log(f.read())[0]
+    fresh = [k for k in device_log if k not in backup]
+    merged = dict(backup); merged.update((k, v) for k, v in device_log.items() if k not in merged)
+    write_atomic(backup_path, "".join(log_line(e) + "\n" for e in ordered(merged)).encode("utf-8"))
+    # 2. anything the iPod lacks (it was reinstalled, say) goes back on the end of its log; nothing there is removed
+    missing = [merged[k] for k in sorted(merged, key=lambda k: (merged[k].get("t", 0), k)) if k not in device_log]
+    if missing:
+        f = dev.docs("reviews.jsonl")
+        dev.ssh("mkdir -p '%s' && F='%s'; if [ -s \"$F\" ] && [ -n \"$(tail -c1 \"$F\")\" ]; then echo >> \"$F\"; fi; cat >> \"$F\" && chown mobile:mobile \"$F\""
+                % (dev.docs(), f), "".join(log_line(e) + "\n" for e in missing).encode("utf-8"))
+    # 3. the app's settings, so cards stats counts the same limits
+    raw = dev.ssh("cat '%s/Library/Preferences/%s.plist' 2>/dev/null; true" % (dev.container, BUNDLE))
+    settings = dict(DEFAULTS)
+    try:
+        settings.update((k, v) for k, v in plistlib.loads(raw).items() if k in DEFAULTS)
+    except Exception:
+        pass
+    write_atomic(os.path.join(state, "settings.json"), json.dumps(settings, indent=1).encode())
+    # 4. the cards, swapped in whole
+    payload = json.dumps({"format": 1, "synced": int(time.time()), "from": computer_name(), "decks": decks, "cards": cards},
+                         ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    d = dev.docs()
+    dev.ssh("mkdir -p '{d}' && cat > '{d}.cards.json.tmp' && mv -f '{d}.cards.json.tmp' '{d}cards.json' && chown mobile:mobile '{d}' '{d}cards.json'".format(d=d), payload)
+    write_atomic(os.path.join(state, "cards.json"), payload)
+    print("sent %d card%s in %d deck%s to the iPod" % (len(cards), "s"[len(cards) == 1:], len(decks), "s"[len(decks) == 1:]))
+    print("reviews: %d new from the iPod, %d in all, backed up to %s" % (len(fresh), len(merged), tilde(backup_path)))
+    if missing:
+        print("put back %d review%s the iPod was missing" % (len(missing), "s"[len(missing) == 1:]))
+    if bad:
+        print("skipped %d unreadable line%s in the iPod's log" % (bad, "s"[bad == 1:]))
+    if problems:
+        print("%d problem%s in the Markdown; cards check lists them" % (len(problems), "s"[len(problems) == 1:]))
+    return 0
+
+
+def cmd_stats(root, args):
+    state = os.path.join(root, ".cards")
+    try:
+        with open(os.path.join(state, "cards.json"), encoding="utf-8") as f:
+            pushed = json.load(f)
+    except OSError:
+        die("no sync yet; run cards sync first")
+    settings = dict(DEFAULTS)
+    try:
+        with open(os.path.join(state, "settings.json")) as f:
+            settings.update(json.load(f))
+    except (OSError, ValueError):
+        pass
+    entries = {}
+    if os.path.exists(os.path.join(state, "reviews.jsonl")):
+        with open(os.path.join(state, "reviews.jsonl"), encoding="utf-8") as f:
+            entries = read_log(f.read())[0]
+    cards = pushed["cards"]
+    states, info = replay(cards, entries, settings, args.now)
+    ago = int(info["now"] - pushed["synced"])
+    print("as of the last sync, %s (%s)\n" % (time.strftime("%b %-d %H:%M", time.localtime(pushed["synced"])), span(ago) + " ago"))
+    width = max([len(d) for d in pushed["decks"]] + [5])
+    print("  %-*s %6s %5s %6s %5s %9s" % (width, "deck", "cards", "new", "learn", "due", "tomorrow"))
+    tot = [0] * 5
+    for deck in pushed["decks"]:
+        n, l, d = deck_counts(cards, states, info, settings, deck)
+        tomorrow = len([1 for c, s in zip(cards, states) if c["deck"] == deck and s.state == REVIEW and s.due_day == info["today"] + 1])
+        row = [len([c for c in cards if c["deck"] == deck]), n, l, d, tomorrow]
+        tot = [a + b for a, b in zip(tot, row)]
+        print("  %-*s %6d %5d %6d %5d %9d" % ((width, deck) + tuple(row)))
+    if len(pushed["decks"]) > 1:
+        print("  %-*s %6d %5d %6d %5d %9d" % ((width, "total") + tuple(tot)))
+    by = [len([s for s in states if s.state == k]) for k in range(4)]
+    mature = len([s for s in states if s.state == REVIEW and s.due_day - s.last_day >= 21])
+    print("\ncards      %d new, %d learning, %d young, %d mature" % (by[NEW], by[LEARNING] + by[RELEARNING], by[REVIEW] - mature, mature))
+    print("today      %d answer%s, %d new card%s, %s" % (info["reviews"], "s"[info["reviews"] == 1:], sum(info["new"].values()),
+                                                     "s"[sum(info["new"].values()) == 1:], span(info["ms"] // 1000)))
+    total, ok = info["ret"]
+    print("retention  %s" % ("%d%% of %d review%s in the last 30 days" % (round(100.0 * ok / total), total, "s"[total == 1:]) if total else "no reviews of graduated cards yet"))
+    streak, d = 0, info["today"] if info["today"] in info["days"] else info["today"] - 1
+    while d in info["days"]:
+        streak += 1; d -= 1
+    print("streak     %d day%s" % (streak, "s"[streak == 1:]))
+    week = []
+    for k in range(1, 8):
+        t = (info["today"] + k) * 86400 + ROLLOVER - info["offset"] + 43200
+        week.append("%s %d" % (time.strftime("%a", time.localtime(t)), len([s for s in states if s.state == REVIEW and s.due_day == info["today"] + k])))
+    print("next week  %s" % "  ".join(week))
+    return 0
+
+
+def span(secs):
+    secs = max(0, int(secs))
+    if secs < 60:
+        return "%ds" % secs
+    if secs < 3600:
+        return "%dm" % (secs // 60)
+    if secs < 86400:
+        return "%dh %dm" % (secs // 3600, secs % 3600 // 60)
+    return "%dd" % (secs // 86400)
+
+
+def tilde(p):
+    home = os.path.expanduser("~")
+    return "~" + p[len(home):] if p.startswith(home) else p
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="cards", description=__doc__.split("\n")[0], epilog=__doc__.split("\n", 2)[2],
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--dir", default=os.environ.get("CARDS_DIR", os.path.expanduser("~/Cards")), help="the cards folder (default ~/Cards)")
+    sub = ap.add_subparsers(dest="cmd")
+    c = sub.add_parser("check", help="parse the cards and point out problems")
+    c.add_argument("--show", metavar="DECK|ID|all", help="also print the HTML for these cards")
+    c.add_argument("--strict", action="store_true", help="exit 1 if there are problems")
+    s = sub.add_parser("sync", help="send the cards to the iPod, back up its review log")
+    s.add_argument("--host", help="sync over Wi-Fi to this address instead of USB")
+    t = sub.add_parser("stats", help="what is due, as of the last sync")
+    t.add_argument("--now", type=int, help=argparse.SUPPRESS)
+    args = ap.parse_args()
+    if not args.cmd:
+        ap.print_help(); return 0
+    root = os.path.abspath(os.path.expanduser(args.dir))
+    if not os.path.isdir(root):
+        die("%s doesn't exist" % tilde(root))
+    return {"check": cmd_check, "sync": cmd_sync, "stats": cmd_stats}[args.cmd](root, args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

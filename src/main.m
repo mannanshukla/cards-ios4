@@ -20,6 +20,8 @@
     float slow = [[NSUserDefaults standardUserDefaults] floatForKey:@"cd_test_speed"]; if (slow > 0) window.layer.speed = slow;   // slow motion, to catch an animation in a screenshot
     return YES;
 }
+- (void)applicationDidEnterBackground:(UIApplication *)app { CDPurge(); }   // suspended, Cards keeps only what is on screen
+- (void)applicationDidReceiveMemoryWarning:(UIApplication *)app { CDPurge(); }
 - (void)applicationDidBecomeActive:(UIApplication *)app { [[NSUserDefaults standardUserDefaults] synchronize]; [[CDStore shared] reloadIfChanged]; }   // a sync, a settings change, or a new day
 - (void)dealloc { [tabs release]; [window release]; [super dealloc]; }
 @end

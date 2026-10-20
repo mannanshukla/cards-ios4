@@ -58,7 +58,9 @@ static NSString *countsLine(CDCounts n) {
     UILabel *name = pressedLabel(CGRectMake(o.x, o.y + CD_STACK_H - 3, CD_STACK_W, 19), [UIFont boldSystemFontOfSize:15], [UIColor colorWithRed:0.20 green:0.12 blue:0.04 alpha:1]); name.text = all ? @"All Decks" : leaf(d); [self add:name];
     UILabel *counts = pressedLabel(CGRectMake(o.x, o.y + CD_STACK_H + 16, CD_STACK_W, 16), [UIFont systemFontOfSize:12.5], [UIColor colorWithRed:0.33 green:0.21 blue:0.08 alpha:1]); counts.text = countsLine(n); [self add:counts];
 }
+- (void)viewDidUnload { [super viewDidUnload]; [items removeAllObjects]; [targets removeAllObjects]; [scroll release]; scroll = nil; }   // a memory warning while Study or Stats is up
 - (void)refresh {
+    if (!self.isViewLoaded) return;
     for (UIView *v in items) [v removeFromSuperview]; [items removeAllObjects]; [targets removeAllObjects];
     CDStore *st = [CDStore shared]; NSArray *decks = [st decks]; CGFloat y = 14;
     if (![st cardCount]) {   // one blank card, and what to do about it
@@ -101,7 +103,7 @@ static NSString *countsLine(CDCounts n) {
 - (void)tick { if (![[CDStore shared] reloadIfChanged] && ++ticks % 10 == 0) [self refresh]; }   // a sync lands within 3 s; learning counts tick over every 30
 - (void)viewDidAppear:(BOOL)a {
     [super viewDidAppear:a];
-    static BOOL warm = NO; if (!warm) { warm = YES; CDWarmUp(); }
+    CDWarmUp();
     NSUserDefaults *u = [NSUserDefaults standardUserDefaults]; NSString *t = [u stringForKey:@"cd_test_study"];
     if (t) { [u removeObjectForKey:@"cd_test_study"]; [self study:[t isEqualToString:@"*"] ? nil : t]; }
     if ([u boolForKey:@"cd_test_stats"]) { [u removeObjectForKey:@"cd_test_stats"]; self.tabBarController.selectedIndex = 1; }
@@ -303,6 +305,7 @@ static NSString *esc(NSString *s) { return [[[s stringByReplacingOccurrencesOfSt
     if ((self = [super init])) {
         self.title = @"Stats"; items = [[NSMutableArray alloc] init];
         [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(refresh) name:CDStoreChanged object:nil];
+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(backgrounded) name:UIApplicationDidEnterBackgroundNotification object:nil];
     }
     return self;
 }
@@ -313,6 +316,9 @@ static NSString *esc(NSString *s) { return [[[s stringByReplacingOccurrencesOfSt
     scroll.backgroundColor = CDDeskColor(); scroll.alwaysBounceVertical = YES; [v addSubview:scroll]; [v addSubview:CDTopShade(320)];
 }
 - (void)viewWillAppear:(BOOL)a { [super viewWillAppear:a]; if (![[CDStore shared] reloadIfChanged]) [self refresh]; }
+- (void)dropCharts { for (UIView *v in items) [v removeFromSuperview]; [items removeAllObjects]; [drawn release]; drawn = nil; }   // about 5 MB of sheets; drawn again when the tab next appears
+- (void)viewDidUnload { [super viewDidUnload]; [self dropCharts]; [scroll release]; scroll = nil; }   // otherwise the new scroll view stays empty while `drawn` still matches
+- (void)backgrounded { if (self.isViewLoaded && !self.view.window) [self dropCharts]; }
 - (void)refresh {
     if (!self.isViewLoaded) return;
     NSDictionary *st = [[CDStore shared] statsSummary]; NSString *key = [st description];

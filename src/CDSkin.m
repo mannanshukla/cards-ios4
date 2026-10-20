@@ -1,7 +1,7 @@
 #import "CDSkin.h"
 
 #define CD_SKIN_VERSION @"7"   // bump when a drawing changes, so cached textures are drawn again
-static NSMutableDictionary *memory = nil; static NSMutableString *timings = nil;
+static NSMutableDictionary *memory = nil; static NSMutableString *timings = nil; static BOOL warm = NO;
 
 UIImage *CDRender(CGSize size, void (^draw)(CGContextRef c)) {
     UIGraphicsBeginImageContextWithOptions(size, NO, 0); draw(UIGraphicsGetCurrentContext());
@@ -22,7 +22,12 @@ UIImage *CDCached(NSString *key, CGSize size, void (^draw)(CGContextRef c)) {
     }
     @synchronized (memory) { [memory setObject:i forKey:key]; } return i;
 }
+void CDPurge(void) {   // views keep the textures they show; the rest come back from Library/Caches, already drawn
+    @synchronized ([UIScreen class]) { if (!memory) return; }
+    @synchronized (memory) { [memory removeAllObjects]; } warm = NO;
+}
 void CDWarmUp(void) {   // the desk's textures, drawn while the cabinet is on screen so the first card opens at once
+    if (warm) return; warm = YES;
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
         NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
         CDDeskImage(CGSizeMake(320, 416)); CDCardImage(YES, 1); CDCardImage(NO, 5); for (int k = 0; k < 3; k++) CDCardImage(NO, 2 + k);

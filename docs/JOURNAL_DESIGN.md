@@ -1,9 +1,7 @@
-# Journal materials v1
+# Native iOS controls with paper content
 
-Meals, Sets, Habits, Cards and Claude share `src/JRMaterials.h` byte for byte. Update all five copies together. No data schema, saved progress, API credentials or integration behavior changes.
+All five apps share the same paper tile. Navigation bars use UIKit's standard glossy, tinted rendering; no cloth background or custom navigation image remains. Native back/edit/add controls, switches, keyboards and tab bars keep platform behavior.
 
-Use warm laid paper for reading and writing, restrained woven cloth for navigation, Helvetica for text, and one consistent top light. Printed information stays flat. Raised native buttons indicate actions. App accents remain olive (Meals), violet (Sets), brown (Habits), raspberry (Cards) and clay (Claude). Existing index cards, checklists and training log structures keep their distinct meaning.
+Meals uses native rounded grouped cells and UIKit section headers and footers. Its printed macro rings remain informational. Sets and Habits use standard table separators and native blue selection, with paper behind their entries. Claude uses standard bar buttons, a native navigation title and a rounded UIKit Send/Stop button. Cards retains its index-card content but uses native rounded Again/Hard/Good/Easy rating buttons and a standard navigation bar.
 
-Meals uses ruled ledger rows, printed macro rings, custom wrapping paper headers/footers and a cloth binding. Its previous floating dashboard and beveled non-interactive gauges are removed. The remaining apps adopt matching bindings and paper in their journal/coaching surfaces. Cards retains its wooden cabinet and physical card interactions.
-
-The material tile is immutable and cached; the renderer uses local deterministic noise without changing global RNG state. Gradient and color-space allocations are released. Existing native controls and accessibility labels remain intact. iOS 5 navigation backgrounds are runtime guarded for the iOS 4.3 SDK.
+Paper is content, not a replacement control skin. Existing data, targets, schedules, integrations and storage schemas are unchanged. Update the identical JRMaterials.h copies in all five repositories together.

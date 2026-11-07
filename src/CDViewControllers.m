@@ -182,8 +182,8 @@ static NSString *esc(NSString *s) { return [[[s stringByReplacingOccurrencesOfSt
     hint = [pressedLabel(CGRectMake(20, 416 - 56, 280, 22), [UIFont systemFontOfSize:13], [UIColor colorWithRed:0.38 green:0.23 blue:0.08 alpha:1]) retain]; hint.text = @"Tap the card to turn it over."; [v addSubview:hint];
     stamps = [[NSMutableArray alloc] init]; intervals = [[NSMutableArray alloc] init];
     for (int k = 0; k < 4; k++) {
-        UIButton *b = [UIButton buttonWithType:UIButtonTypeCustom]; b.frame = CGRectMake(8 + k * 77, 416 - 76, 73, 70); b.tag = k + 1; b.adjustsImageWhenHighlighted = NO;
-        [b setImage:CDStampImage(k + 1, NO) forState:UIControlStateNormal]; [b setImage:CDStampImage(k + 1, YES) forState:UIControlStateHighlighted];
+        UIButton *b = [UIButton buttonWithType:UIButtonTypeRoundedRect]; b.frame = CGRectMake(8 + k * 77, 416 - 76, 73, 60); b.tag = k + 1; b.adjustsImageWhenHighlighted = NO;
+        [b setTitle:[@[@"Again",@"Hard",@"Good",@"Easy"] objectAtIndex:k] forState:UIControlStateNormal];b.titleLabel.font=[UIFont boldSystemFontOfSize:14];b.titleEdgeInsets=UIEdgeInsetsMake(0,0,16,0);
         UILabel *l = [[[UILabel alloc] initWithFrame:CGRectMake(7, 41, 59, 12)] autorelease]; l.font = [UIFont systemFontOfSize:10]; l.textAlignment = UITextAlignmentCenter; l.backgroundColor = [UIColor clearColor];
         l.textColor = [UIColor colorWithRed:0.35 green:0.35 blue:0.38 alpha:1]; l.userInteractionEnabled = NO; [b addSubview:l];
         [b addTarget:self action:@selector(press:) forControlEvents:UIControlEventTouchDown | UIControlEventTouchDragEnter];
@@ -263,7 +263,7 @@ static NSString *esc(NSString *s) { return [[[s stringByReplacingOccurrencesOfSt
     [self showStamps:YES animated:YES];
     if (answerOnLoad) { int r = answerOnLoad; answerOnLoad = 0; [self performSelector:@selector(stampWith:) withObject:[NSNumber numberWithInt:r] afterDelay:0.8]; }
 }
-- (void)press:(UIButton *)b { [[intervals objectAtIndex:b.tag - 1] setFrame:CGRectMake(7, 44, 59, 12)]; }   // the proof label sinks with the block
+- (void)press:(UIButton *)b { [[intervals objectAtIndex:b.tag - 1] setFrame:CGRectMake(7, 41, 59, 12)]; }   // the proof label sinks with the block
 - (void)release:(UIButton *)b { [[intervals objectAtIndex:b.tag - 1] setFrame:CGRectMake(7, 41, 59, 12)]; }
 - (void)stampButton:(UIButton *)b { [self release:b]; [self stampWith:[NSNumber numberWithInt:(int)b.tag]]; }
 - (void)stampWith:(NSNumber *)rating {   // slam, a thunk through the stack, then the card goes on the done pile

@@ -1,8 +1,11 @@
+#import "JRMaterials.h"
 #import "CLPaper.h"
 #import "ORTextLayout.h"
 #import "ORMarkdown.h"
 #import <QuartzCore/QuartzCore.h>
-void CLPaperTable(UITableView *t) { static UIColor *paper=nil;if(!paper) { UIGraphicsBeginImageContextWithOptions(CGSizeMake(64,64),YES,1);CGContextRef c=UIGraphicsGetCurrentContext();CGContextSetFillColorWithColor(c,CLColor(0xF2EBDE).CGColor);CGContextFillRect(c,CGRectMake(0,0,64,64));unsigned seed=712;for(int i=0;i<1800;i++) { seed=seed*1664525+1013904223;CGFloat x=(seed>>8)%64;seed=seed*1664525+1013904223;CGFloat y=(seed>>8)%64;CGContextSetGrayFillColor(c,(seed&1)?1:0,0.018);CGContextFillRect(c,CGRectMake(x,y,1,1)); }paper=[[UIColor colorWithPatternImage:UIGraphicsGetImageFromCurrentImageContext()] retain];UIGraphicsEndImageContext(); }t.backgroundView=nil;t.backgroundColor=paper;t.separatorColor=CLColor(0xD8CDBA); }
+void CLPaperTable(UITableView *t) {
+t.backgroundView=nil;t.backgroundColor=JRPaper();t.separatorColor=JRRule();
+}
 UIImage *CLCoachIcon(void) { UIGraphicsBeginImageContextWithOptions(CGSizeMake(28,28),NO,0);CGContextRef c=UIGraphicsGetCurrentContext();CGContextSetFillColorWithColor(c,[UIColor whiteColor].CGColor);UIBezierPath *p=[UIBezierPath bezierPathWithRoundedRect:CGRectMake(2,3,24,18) cornerRadius:5];[p fill];CGContextMoveToPoint(c,7,19);CGContextAddLineToPoint(c,7,26);CGContextAddLineToPoint(c,15,20);CGContextFillPath(c);CGContextSetBlendMode(c,kCGBlendModeClear);CGContextFillRect(c,CGRectMake(7,8,14,2));CGContextFillRect(c,CGRectMake(7,13,10,2));UIImage *im=UIGraphicsGetImageFromCurrentImageContext();UIGraphicsEndImageContext();return im; }
 @interface CLNotePage : UIView { ORTextLayout *layout; NSUInteger page; }
 - (id)initWithLayout:(ORTextLayout *)layout page:(NSUInteger)page;

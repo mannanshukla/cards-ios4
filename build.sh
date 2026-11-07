@@ -28,8 +28,8 @@ cat > "$OUT/Payload/$APP.app/Info.plist" <<PL
 <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
 <key>CFBundleName</key><string>Cards</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>2.0</string>
-<key>CFBundleVersion</key><string>2</string>
+<key>CFBundleShortVersionString</key><string>2.1</string>
+<key>CFBundleVersion</key><string>3</string>
 <key>LSRequiresIPhoneOS</key><true/>
 <key>MinimumOSVersion</key><string>4.3</string>
 <key>UIDeviceFamily</key><array><integer>1</integer></array>

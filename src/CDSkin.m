@@ -1,6 +1,7 @@
+#import "JRMaterials.h"
 #import "CDSkin.h"
 
-#define CD_SKIN_VERSION @"7"   // bump when a drawing changes, so cached textures are drawn again
+#define CD_SKIN_VERSION @"8"   // bump when a drawing changes, so cached textures are drawn again
 static NSMutableDictionary *memory = nil; static NSMutableString *timings = nil; static BOOL warm = NO;
 
 UIImage *CDRender(CGSize size, void (^draw)(CGContextRef c)) {
@@ -39,9 +40,7 @@ void CDWarmUp(void) {   // the desk's textures, drawn while the cabinet is on sc
 }
 
 void CDSkinNavBar(UINavigationBar *bar) {
-    UIImage *cloth = CDCached(@"cloth", CGSizeMake(320, 44), ^(CGContextRef c) { CDDrawCloth(c, CGRectMake(0, 0, 320, 44)); });
-    if ([bar respondsToSelector:@selector(setBackgroundImage:forBarMetrics:)]) [bar performSelector:@selector(setBackgroundImage:forBarMetrics:) withObject:cloth withObject:0];   // iOS 5 API, absent from the 4.3 SDK
-    bar.tintColor = [UIColor colorWithRed:0.50 green:0.08 blue:0.24 alpha:1];   // the buttons in a deeper raspberry than the cloth
+    JRStyleBar(bar,0x9B3453);bar.tintColor=[UIColor colorWithRed:.50 green:.08 blue:.24 alpha:1];
 }
 UIColor *CDDeskColor(void) { return [UIColor colorWithPatternImage:CDCached(@"desk-tile", CGSizeMake(320, 480), ^(CGContextRef c) { CDDrawOak(c, CGRectMake(0, 0, 320, 480), 3, 1); })]; }
 UIImage *CDDeskImage(CGSize size) {

@@ -224,7 +224,7 @@ static void cardShadow(CGContextRef c, CGRect r) {
     CGContextSaveGState(c); castShadow(c, 0.6 + 1.2 * k, 1.5 + 2.5 * k, 0.40); fill(c, 1, 1, 1, 1); fillPath(c, path); CGContextRestoreGState(c); CGPathRelease(path);
 }
 static void cardFace(CGContextRef c, CGRect r, uint32_t seed, int ruled) {
-    CGFloat k = r.size.width / CD_CARD_W; CGPathRef path = rounded(r, fmax(0.8, 1.5 * k)); static const CGFloat tone[] = { 0.995, 0.986, 0.955 };
+    CGFloat k = r.size.width / CD_CARD_W; CGPathRef path = rounded(r, fmax(0.8, 1.5 * k)); static const CGFloat tone[] = { 0.975, 0.958, 0.907 };
     paper(c, path, r, seed, tone, k > 0.6 ? 1 : 0.5);
     if (ruled) {   // one red line under the heading, blue lines below it
         CGFloat y = hair(r.origin.y + CD_CARD_HEADER * k); stroke(c, 0.86, 0.32, 0.38, 0.80, k > 0.6 ? 1.0 : 0.5); line(c, r.origin.x, y, CGRectGetMaxX(r), y);

@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 """The Markdown formats tools/cards understands, one assertion each."""
 import os, sys, tempfile
+import sys
 from importlib.machinery import SourceFileLoader
+from importlib.util import spec_from_loader, module_from_spec
 
 here = os.path.dirname(os.path.abspath(__file__))
-cards = SourceFileLoader("cards", os.path.join(here, "..", "tools", "cards")).load_module()
+loader = SourceFileLoader("cards", os.path.join(here, "..", "tools", "cards"))
+cards = module_from_spec(spec_from_loader("cards", loader))
+sys.modules["cards"] = cards
+loader.exec_module(cards)
 
 
 def parse(text, name="Deck.md"):

@@ -1,5 +1,6 @@
 #import "CDStore.h"
 #import "ORJSON.h"
+#import "CDCoachText.h"
 #import <objc/message.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -51,6 +52,14 @@ static int byTime(const void *a, const void *b) { const CDEntry *x = a, *y = b; 
 @implementation CDStore
 + (CDStore *)shared { static CDStore *s = nil; if (!s) { s = [[CDStore alloc] init]; [s reloadIfChanged]; } return s; }
 - (id)init { if ((self = [super init])) { cards = [[NSArray alloc] init]; decks = [[NSArray alloc] init]; mine = [[NSMutableArray alloc] init]; studyDays = [[NSMutableIndexSet alloc] init]; dayAnswers = [[NSMutableDictionary alloc] init]; today = -1; cardsStamp = logStamp = -1; } return self; }
+
+- (void)dealloc { [cards release];[decks release];[synced release];[from release];[mine release];[studyDays release];[dayAnswers release];free(state);free(deckOf);free(noteOf);free(buried);free(newToday);free(revToday);free(log);[super dealloc]; }
+- (NSArray *)difficultCardsForDeck:(NSString *)deck {
+    NSMutableArray *out=[NSMutableArray array];for(NSUInteger i=0;i<[cards count];i++) { NSDictionary *c=[cards objectAtIndex:i];if(deck && ![[c objectForKey:@"deck"] isEqual:deck])continue;if(!state[i].lapses)continue;
+        [out addObject:[NSDictionary dictionaryWithObjectsAndKeys:[c objectForKey:@"id"],@"id",CDCoachPlain([c objectForKey:@"front"],1800),@"front",CDCoachPlain([c objectForKey:@"back"],2400),@"back",[c objectForKey:@"deck"],@"deck",[NSNumber numberWithInt:state[i].lapses],@"lapses",nil]];
+    }[out sortUsingDescriptors:[NSArray arrayWithObjects:[NSSortDescriptor sortDescriptorWithKey:@"lapses" ascending:NO],[NSSortDescriptor sortDescriptorWithKey:@"front" ascending:YES],nil]];return [out count]>8?[out subarrayWithRange:NSMakeRange(0,8)]:out;
+}
+- (NSString *)coachSummaryForDeck:(NSString *)deck { CDCounts c=[self countsForDeck:deck];NSDictionary *s=[self statsSummary];return [NSString stringWithFormat:@"Study scope: %@. Available today: %ld new, %ld learning, %ld due reviews. Overall today: %@ answers, %@ minutes. Overall study streak: %@ days. Last 30 days: %@ reviewed cards, %@ percent remembered (-1 means no data). Target retention: %@ percent. The existing spaced-repetition schedule decides when cards return. No card contents are included unless the user selects a difficult card.",deck?:@"All decks",(long)c.fresh,(long)c.learning,(long)c.due,[s objectForKey:@"answersToday"],[s objectForKey:@"minutesToday"],[s objectForKey:@"streak"],[s objectForKey:@"reviews30"],[s objectForKey:@"retention"],[s objectForKey:@"target"]]; }
 
 - (void)loadCards {
     NSData *d = [NSData dataWithContentsOfFile:docs(@"cards.json")]; id j = d ? parseJSON(d) : nil;

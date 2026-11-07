@@ -24,5 +24,9 @@ int main(void) {
     for (NSArray *w in [st objectForKey:@"weeks"]) for (NSNumber *n in w) [line appendFormat:@" %@", n];
     for (NSString *k in [NSArray arrayWithObjects:@"cardsNew", @"cardsLearning", @"cardsYoung", @"cardsMature", @"answersToday", @"newToday", @"minutesToday", @"streak", @"retention", @"reviews30", nil]) [line appendFormat:@" %@", [st objectForKey:k]];
     printf("%s\n", [line UTF8String]);
+    NSData *before=[NSData dataWithContentsOfFile:docs(@"reviews.jsonl")];NSArray *hard=[s difficultCardsForDeck:nil];if([hard count]>8)abort();int lapses=INT_MAX;for(NSDictionary *c in hard) { int n=[[c objectForKey:@"lapses"] intValue];if(n<=0 || n>lapses || [[c objectForKey:@"front"] length]>1800 || [[c objectForKey:@"back"] length]>2400)abort();lapses=n; }
+    for(NSString *deck in [s decks]) { for(NSDictionary *c in [s difficultCardsForDeck:deck])if(![[c objectForKey:@"deck"] isEqual:deck])abort();if(![[s coachSummaryForDeck:deck] length])abort(); }
+    if(![before isEqual:[NSData dataWithContentsOfFile:docs(@"reviews.jsonl")]])abort();
+    printf("coach read-only context and difficult-card ranking passed\n");
     [p release]; return 0;
 }

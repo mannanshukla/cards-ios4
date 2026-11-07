@@ -4,10 +4,15 @@
   python3 tests/crosscheck.py [harness binary] [histories]
 """
 import os, random, subprocess, sys
+import sys
 from importlib.machinery import SourceFileLoader
+from importlib.util import spec_from_loader, module_from_spec
 
 here = os.path.dirname(os.path.abspath(__file__))
-cards = SourceFileLoader("cards", os.path.join(here, "..", "tools", "cards")).load_module()
+loader = SourceFileLoader("cards", os.path.join(here, "..", "tools", "cards"))
+cards = module_from_spec(spec_from_loader("cards", loader))
+sys.modules["cards"] = cards
+loader.exec_module(cards)
 harness = sys.argv[1] if len(sys.argv) > 1 else "/tmp/fsrs_check"
 n = int(sys.argv[2]) if len(sys.argv) > 2 else 2000
 

@@ -2,9 +2,14 @@
 # The app's day rollover means the two only line up when every review lands on its due time, which this arranges.
 import os, random, sys
 from datetime import datetime, timezone, timedelta
+import sys
 from importlib.machinery import SourceFileLoader
+from importlib.util import spec_from_loader, module_from_spec
 import fsrs
-cards = SourceFileLoader("cards", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools", "cards")).load_module()
+loader = SourceFileLoader("cards", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools", "cards"))
+cards = module_from_spec(spec_from_loader("cards", loader))
+sys.modules["cards"] = cards
+loader.exec_module(cards)
 sch = fsrs.Scheduler(enable_fuzzing=False)
 rng = random.Random(3); n = bad = 0; maxds = maxdd = 0
 for h in range(3000):

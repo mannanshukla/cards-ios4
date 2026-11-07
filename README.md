@@ -4,11 +4,21 @@ Flashcards for the iPod touch 4, written in Markdown on the Mac. Every file in `
 
 ## The desk
 
-Two tabs, Decks and Stats. Each deck is a stack of ruled index cards on a honey-oak desk, two to a row, with folders as letterpressed headings and a red badge on any stack with reviews due. Tap a stack and it lifts, then opens. A study session is a card off the top of that stack, written in bold and centred on its blue rules: tap it to turn it over, then press one of four rubber stamps, Again, Hard, Good or Easy, with the interval each would give printed on it. The stamp lands on the card, the card goes on the done pile, and the next one comes off the stack.
+Three tabs: Decks, Coach and Stats. Each deck is a stack of ruled index cards on a honey-oak desk, two to a row, with folders as letterpressed headings and a red badge on any stack with reviews due. Tap a stack and it lifts, then opens. A study session is a card off the top of that stack, written in bold and centred on its blue rules: tap it to turn it over, then press one of four rubber stamps, Again, Hard, Good or Easy, with the interval each would give printed on it. The stamp lands on the card, the card goes on the done pile, and the next one comes off the stack.
 
 Stats is a desk of paper sheets: today's answers, streak and minutes; the last 30 days' answers by rating in the stamps' inks; reviews coming due over the next 30 days; retention week by week against the retention you aim for; and the cards by state. Under them is a library date-due slip with the days you studied in violet date stamps. `cards stats` shows the same numbers on the Mac, and `cards stats --json` gives exactly what the charts draw.
 
 Every surface is drawn in code and lit from above; the type is Helvetica throughout, and Japanese falls back to Hiragino.
+
+## Study coach (2.0)
+
+**Coach** helps plan a session around your goal, confidence, time and due reviews. Choose a deck or all decks, record a check-in, ask a question, or tap a card with repeated lapses for an explanation, memory aid and retrieval question. **Start reviewing** returns to the normal study flow.
+
+Review the shared summary before tapping Ask. General coaching includes counts and study statistics; card text is included only when you choose that card. Answers are saved as native paper notes with Markdown headings, lists and boxed code. **Discuss in Claude** opens an unsent draft in Claude 3.2 or newer.
+
+Set the API key and optional model in **Settings → Cards → AI Coach**. The app connects directly over Wi-Fi using TLSFix and trusted roots, with certificate verification enabled. No computer is needed for coaching. API billing is separate from a Claude subscription; keys are never bundled or logged.
+
+Coaching does not rewrite decks, grade answers or alter the FSRS schedule. The Mac remains the author of `cards.json`; `reviews.jsonl` remains the append-only review history. New check-ins and saved notes use separate preferences. The difficult-card list is a read-only ranking of up to eight cards with the most lapses, with content bounded before sharing.
 
 ## Writing cards
 
@@ -73,3 +83,5 @@ Targets iOS 4.3 on armv7 from a modern Mac with only the Command Line Tools inst
 ## License
 
 MIT.
+
+`./tests/device-build.sh` builds a separate CardsAudit app for repeated Coach, check-in, question and note loading/unloading. It uses a synthetic deck, verifies that no review log is written, and checks that all 200 controllers are released with bounded heap use. Host store tests also verify difficult-card ranking, deck scope and unchanged review-log bytes. New requests cancel on navigation or backgrounding; failures do not replace saved notes.

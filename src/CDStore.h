@@ -27,5 +27,7 @@ typedef struct { char rid[40], cid[24], undo[40]; long long t; int o, r, ms, car
 - (BOOL)canUndo;
 - (NSInteger)undo;   // takes back the last answer; returns its card
 - (NSInteger)answersToday;
+- (NSArray *)difficultCardsForDeck:(NSString *)deck;
+- (NSString *)coachSummaryForDeck:(NSString *)deck;
 - (NSDictionary *)statsSummary;   // what Stats draws; the same numbers as `cards stats --json`
 @end

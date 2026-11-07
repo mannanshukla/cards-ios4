@@ -2,3 +2,4 @@ build/
 *.ipa
 .DS_Store
 __pycache__/
+test-build/

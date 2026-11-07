@@ -5,7 +5,7 @@ set -e
 cd "$(dirname "$0")/.."
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 clang -O2 -o "$T/fsrs_check" tests/fsrs_check.c src/CDFSRS.c
-clang -fno-objc-arc -Wno-deprecated-declarations -framework Foundation -o "$T/store_check" tests/store_check.m src/CDFSRS.c
+clang -fno-objc-arc -Wno-deprecated-declarations -framework Foundation -o "$T/store_check" tests/store_check.m src/CDFSRS.c src/CDCoachText.m
 python3 tests/parse_test.py
 python3 tests/crosscheck.py "$T/fsrs_check" 2000
 python3 tests/store_check.py "$T/store_check"

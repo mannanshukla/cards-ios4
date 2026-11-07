@@ -1,128 +1,71 @@
 #import "ORJSON.h"
-
-// Works on a plain unichar copy of the text: one object per JSON value, never one per character.
-@interface ORJSONParser : NSObject {
-    unichar *buf; NSUInteger pos; NSUInteger len; BOOL failed;
-}
-- (id)initWithString:(NSString *)s;
-- (id)parseValue;
+#import <math.h>
+@interface ORJSONParser : NSObject { unichar *buf;NSUInteger pos,len,depth;BOOL failed; }
+- (id)initWithString:(NSString *)string;
+- (id)document;
 @end
-
-static unsigned hex4(const unichar *p) {   // like scanHexInt over four characters: stops at the first non-hex one
-    unsigned v = 0;
-    for (int i = 0; i < 4; i++) { unichar h = p[i]; int d = h >= '0' && h <= '9' ? h - '0' : h >= 'a' && h <= 'f' ? h - 'a' + 10 : h >= 'A' && h <= 'F' ? h - 'A' + 10 : -1; if (d < 0) break; v = v * 16 + d; }
-    return v;
-}
-
+static int hexDigit(unichar c) { return c>='0'&&c<='9'?c-'0':c>='a'&&c<='f'?c-'a'+10:c>='A'&&c<='F'?c-'A'+10:-1; }
 @implementation ORJSONParser
-- (id)initWithString:(NSString *)s { if ((self = [super init])) { len = [s length]; buf = malloc(MAX(len, 1) * sizeof(unichar)); [s getCharacters:buf range:NSMakeRange(0, len)]; pos = 0; } return self; }
-- (void)dealloc { free(buf); [super dealloc]; }
-- (unichar)peek { return pos < len ? buf[pos] : 0; }
-- (void)skipWS { while (pos < len) { unichar c = buf[pos]; if (c==' '||c=='\n'||c=='\r'||c=='\t') pos++; else break; } }
-- (BOOL)consume:(NSString *)lit {
-    NSUInteger n = [lit length]; if (pos + n > len) return NO;
-    for (NSUInteger i = 0; i < n; i++) if (buf[pos + i] != [lit characterAtIndex:i]) return NO;
-    pos += n; return YES;
-}
-- (NSString *)parseString {
-    if ([self peek] != '"') { failed = YES; return nil; }
-    NSUInteger start = ++pos;
-    while (pos < len && buf[pos] != '"' && buf[pos] != '\\') pos++;
-    if (pos < len && buf[pos] == '"') { pos++; return [NSString stringWithCharacters:buf + start length:pos - 1 - start]; }   // no escapes: the common case
-    NSMutableString *out = [NSMutableString stringWithCharacters:buf + start length:pos - start];
-    while (pos < len) {
-        unichar c = buf[pos++];
-        if (c == '"') return out;
-        if (c == '\\') {
-            if (pos >= len) break;
-            unichar e = buf[pos++];
-            switch (e) {
-                case '"': [out appendString:@"\""]; break;
-                case '\\': [out appendString:@"\\"]; break;
-                case '/': [out appendString:@"/"]; break;
-                case 'b': [out appendString:@"\b"]; break;
-                case 'f': [out appendString:@"\f"]; break;
-                case 'n': [out appendString:@"\n"]; break;
-                case 'r': [out appendString:@"\r"]; break;
-                case 't': [out appendString:@"\t"]; break;
-                case 'u': {
-                    if (pos + 4 > len) { failed = YES; return nil; }
-                    unichar u = (unichar)hex4(buf + pos); pos += 4;
-                    // surrogate pair
-                    if (u >= 0xD800 && u <= 0xDBFF && pos + 6 <= len && buf[pos]=='\\' && buf[pos+1]=='u') {
-                        unichar pair[2] = { u, (unichar)hex4(buf + pos + 2) }; pos += 6;
-                        CFStringAppendCharacters((CFMutableStringRef)out, pair, 2);
-                    } else { CFStringAppendCharacters((CFMutableStringRef)out, &u, 1); }
-                    break;
-                }
-                default: failed = YES; return nil;
+- (id)initWithString:(NSString *)string { if((self=[super init])) { len=[string length];if(len>2097152) { [self release];return nil; }buf=malloc(MAX(len,1)*sizeof(unichar));if(!buf) { [self release];return nil; }[string getCharacters:buf range:NSMakeRange(0,len)]; }return self; }
+- (void)dealloc { free(buf);[super dealloc]; }
+- (unichar)peek { return pos<len?buf[pos]:0; }
+- (void)space { while(pos<len && (buf[pos]==' '||buf[pos]=='\t'||buf[pos]=='\r'||buf[pos]=='\n'))pos++; }
+- (id)bad { failed=YES;return nil; }
+- (BOOL)consume:(NSString *)literal { NSUInteger n=[literal length];if(n>len-pos)return NO;for(NSUInteger i=0;i<n;i++)if(buf[pos+i]!=[literal characterAtIndex:i])return NO;pos+=n;return YES; }
+- (int)unicode { if(len-pos<4) { failed=YES;return 0; }int v=0;for(int i=0;i<4;i++) { int digit=hexDigit(buf[pos++]);if(digit<0) { failed=YES;return 0; }v=v*16+digit; }return v; }
+- (NSString *)string {
+    if([self peek]!='"')return [self bad];pos++;NSMutableString *result=[NSMutableString string];
+    while(pos<len) {
+        unichar c=buf[pos++];if(c=='"')return result;if(c<32)return [self bad];
+        if(c=='\\') {
+            if(pos==len)return [self bad];unichar e=buf[pos++];
+            switch(e) {
+                case '"':c='"';break;case '\\':c='\\';break;case '/':c='/';break;case 'b':c='\b';break;case 'f':c='\f';break;case 'n':c='\n';break;case 'r':c='\r';break;case 't':c='\t';break;
+                case 'u':c=[self unicode];if(failed)return nil;break;default:return [self bad];
             }
+            if(c>=0xD800 && c<=0xDBFF) {
+                if(![self consume:@"\\u"])return [self bad];unichar low=[self unicode];if(failed || low<0xDC00 || low>0xDFFF)return [self bad];unichar pair[]={c,low};CFStringAppendCharacters((CFMutableStringRef)result,pair,2);continue;
+            }
+            if(c>=0xDC00 && c<=0xDFFF)return [self bad];CFStringAppendCharacters((CFMutableStringRef)result,&c,1);
         } else {
-            NSUInteger run = pos - 1;   // copy everything up to the next quote or backslash in one go
-            while (pos < len && buf[pos] != '"' && buf[pos] != '\\') pos++;
-            CFStringAppendCharacters((CFMutableStringRef)out, buf + run, pos - run);
+            NSUInteger start=pos-1;while(pos<len && buf[pos]!='"' && buf[pos]!='\\' && buf[pos]>=32)pos++;
+            for(NSUInteger i=start;i<pos;i++) {
+                if(buf[i]>=0xD800 && buf[i]<=0xDBFF) { if(i+1>=pos || buf[i+1]<0xDC00 || buf[i+1]>0xDFFF)return [self bad];i++; }
+                else if(buf[i]>=0xDC00 && buf[i]<=0xDFFF)return [self bad];
+            }
+            CFStringAppendCharacters((CFMutableStringRef)result,buf+start,pos-start);
         }
-    }
-    failed = YES; return nil;
+    }return [self bad];
 }
-- (id)parseNumber {
-    NSUInteger start = pos; BOOL real = NO;
-    while (pos < len) { unichar c = buf[pos]; if ((c>='0'&&c<='9')||c=='-'||c=='+') pos++; else if (c=='.'||c=='e'||c=='E') { real = YES; pos++; } else break; }
-    NSString *s = [NSString stringWithCharacters:buf + start length:pos - start];
-    if (real) return [NSNumber numberWithDouble:[s doubleValue]];
-    return [NSNumber numberWithLongLong:[s longLongValue]];
+- (BOOL)digit { return [self peek]>='0' && [self peek]<='9'; }
+- (NSNumber *)number {
+    NSUInteger start=pos;BOOL real=NO;if([self peek]=='-')pos++;
+    if([self peek]=='0')pos++;else { if(![self digit])return [self bad];while([self digit])pos++; }
+    if([self peek]=='.') { real=YES;pos++;if(![self digit])return [self bad];while([self digit])pos++; }
+    if([self peek]=='e'||[self peek]=='E') { real=YES;pos++;if([self peek]=='+'||[self peek]=='-')pos++;if(![self digit])return [self bad];while([self digit])pos++; }
+    NSString *number=[NSString stringWithCharacters:buf+start length:pos-start];double v=[number doubleValue];if(!isfinite(v))return [self bad];
+    return real || v>=9223372036854775807.0 || v< -9223372036854775808.0?[NSNumber numberWithDouble:v]:[NSNumber numberWithLongLong:[number longLongValue]];
 }
-- (id)parseValue {
-    [self skipWS];
-    if (failed || pos >= len) { failed = YES; return nil; }
-    unichar c = [self peek];
-    if (c == '{') {
-        pos++; NSMutableDictionary *d = [NSMutableDictionary dictionary];
-        [self skipWS]; if ([self peek] == '}') { pos++; return d; }
-        while (!failed) {
-            [self skipWS]; NSString *k = [self parseString]; if (failed) return nil;
-            [self skipWS]; if (![self consume:@":"]) { failed = YES; return nil; }
-            id v = [self parseValue]; if (failed) return nil;
-            [d setObject:v forKey:k];
-            [self skipWS];
-            if ([self consume:@","]) continue;
-            if ([self consume:@"}"]) return d;
-            failed = YES; return nil;
-        }
-        return nil;
+- (id)value {
+    [self space];if(failed || pos>=len || depth>=64)return [self bad];unichar c=[self peek];
+    if(c=='"')return [self string];
+    if(c=='{'||c=='[') {
+        BOOL object=c=='{';pos++;depth++;id result=object?(id)[NSMutableDictionary dictionary]:(id)[NSMutableArray array];[self space];unichar closing=object?'}':']';
+        if([self peek]==closing) { pos++;depth--;return result; }
+        while(!failed) {
+            NSString *key=nil;
+            if(object) { [self space];key=[self string];if(failed)return nil;[self space];if(![self consume:@":"])return [self bad]; }
+            id next=[self value];if(failed || !next)return nil;if(object)[result setObject:next forKey:key];else [result addObject:next];[self space];
+            if([self peek]==closing) { pos++;depth--;return result; }if(![self consume:@","])return [self bad];
+        }return nil;
     }
-    if (c == '[') {
-        pos++; NSMutableArray *a = [NSMutableArray array];
-        [self skipWS]; if ([self peek] == ']') { pos++; return a; }
-        while (!failed) {
-            id v = [self parseValue]; if (failed) return nil;
-            [a addObject:v];
-            [self skipWS];
-            if ([self consume:@","]) continue;
-            if ([self consume:@"]"]) return a;
-            failed = YES; return nil;
-        }
-        return nil;
-    }
-    if (c == '"') return [self parseString];
-    if ([self consume:@"true"]) return [NSNumber numberWithBool:YES];
-    if ([self consume:@"false"]) return [NSNumber numberWithBool:NO];
-    if ([self consume:@"null"]) return [NSNull null];
-    if (c == '-' || (c >= '0' && c <= '9')) return [self parseNumber];
-    failed = YES; return nil;
+    if([self consume:@"true"])return [NSNumber numberWithBool:YES];if([self consume:@"false"])return [NSNumber numberWithBool:NO];if([self consume:@"null"])return [NSNull null];
+    if(c=='-' || [self digit])return [self number];return [self bad];
 }
-- (BOOL)failed { return failed; }
+- (id)document { id value=[self value];[self space];return failed || pos!=len?nil:value; }
 @end
-
 @implementation ORJSON
-+ (id)parse:(NSString *)text {
-    if (!text) return nil;
-    ORJSONParser *p = [[ORJSONParser alloc] initWithString:text];
-    id v = [p parseValue];
-    BOOL bad = [p failed];
-    [p release];
-    return bad ? nil : v;
-}
++ (id)parse:(NSString *)text { if(![text isKindOfClass:[NSString class]])return nil;ORJSONParser *parser=[[ORJSONParser alloc] initWithString:text];id result=[parser document];[parser release];return result; }
 + (NSString *)escape:(NSString *)s {
     static NSCharacterSet *special = nil;
     if (!special) { NSMutableCharacterSet *m = [NSMutableCharacterSet characterSetWithRange:NSMakeRange(0, 0x20)]; [m addCharactersInString:@"\"\\"]; special = [m copy]; }

@@ -5,10 +5,15 @@ built for the Mac and by tools/cards; card schedules and deck counts must match.
   python3 tests/store_check.py <store_check binary>
 """
 import json, os, random, subprocess, sys, tempfile, time
+import sys
 from importlib.machinery import SourceFileLoader
+from importlib.util import spec_from_loader, module_from_spec
 
 here = os.path.dirname(os.path.abspath(__file__))
-cards = SourceFileLoader("cards", os.path.join(here, "..", "tools", "cards")).load_module()
+loader = SourceFileLoader("cards", os.path.join(here, "..", "tools", "cards"))
+cards = module_from_spec(spec_from_loader("cards", loader))
+sys.modules["cards"] = cards
+loader.exec_module(cards)
 rng = random.Random(11)
 decks, cs, _ = cards.load_cards(os.path.join(here, "fixtures"))
 now = int(time.time()); off = time.localtime(now).tm_gmtoff

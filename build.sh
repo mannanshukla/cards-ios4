@@ -1,6 +1,7 @@
 #!/bin/zsh
 # Builds Cards.app for armv7 / iOS 4.3 using the stubbed iPhoneOS 4.3 SDK, packages an IPA.
-set -e
+set -euo pipefail
+export PATH="/opt/homebrew/bin:$PATH"
 cd "$(dirname "$0")"
 SDK=/Users/mshukla/ios4sdk/iPhoneOS4.3.sdk
 APP=Cards
@@ -11,7 +12,7 @@ for f in src/*.m src/*.c; do
   clang "${CFLAGS[@]}" -c "$f" -o "$OUT/obj/$(basename "${f%.*}").o"
 done
 clang -target armv7-apple-ios4.3 -isysroot "$SDK" "$OUT"/obj/*.o -o "$OUT/Payload/$APP.app/$APP" \
-  -framework UIKit -framework Foundation -framework CoreGraphics -framework QuartzCore -framework CoreText -lobjc 2>&1 | grep -v 'no platform load command' || true
+  -framework UIKit -framework Foundation -framework CoreGraphics -framework QuartzCore -framework CoreText -lobjc
 test -f "$OUT/Payload/$APP.app/$APP"
 cp -R res/Settings.bundle "$OUT/Payload/$APP.app/"
 cp res/Icon.png res/Icon@2x.png res/Default.png res/Default@2x.png "$OUT/Payload/$APP.app/"
@@ -27,8 +28,8 @@ cat > "$OUT/Payload/$APP.app/Info.plist" <<PL
 <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
 <key>CFBundleName</key><string>Cards</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>1.1</string>
-<key>CFBundleVersion</key><string>1</string>
+<key>CFBundleShortVersionString</key><string>2.0</string>
+<key>CFBundleVersion</key><string>2</string>
 <key>LSRequiresIPhoneOS</key><true/>
 <key>MinimumOSVersion</key><string>4.3</string>
 <key>UIDeviceFamily</key><array><integer>1</integer></array>

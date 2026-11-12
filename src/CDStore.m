@@ -55,9 +55,9 @@ static int byTime(const void *a, const void *b) { const CDEntry *x = a, *y = b; 
 
 - (void)dealloc { [cards release];[decks release];[synced release];[from release];[mine release];[studyDays release];[dayAnswers release];free(state);free(deckOf);free(noteOf);free(buried);free(newToday);free(revToday);free(log);[super dealloc]; }
 - (NSArray *)difficultCardsForDeck:(NSString *)deck {
-    NSMutableArray *out=[NSMutableArray array];for(NSUInteger i=0;i<[cards count];i++) { NSDictionary *c=[cards objectAtIndex:i];if(deck && ![[c objectForKey:@"deck"] isEqual:deck])continue;if(!state[i].lapses)continue;
+    NSMutableArray *out=[NSMutableArray array];for(NSUInteger i=0;i<[cards count];i++) { @autoreleasepool { NSDictionary *c=[cards objectAtIndex:i];if(deck && ![[c objectForKey:@"deck"] isEqual:deck])continue;if(!state[i].lapses)continue;   // each card's text is stripped of its HTML: a pool per card
         [out addObject:[NSDictionary dictionaryWithObjectsAndKeys:[c objectForKey:@"id"],@"id",CDCoachPlain([c objectForKey:@"front"],1800),@"front",CDCoachPlain([c objectForKey:@"back"],2400),@"back",[c objectForKey:@"deck"],@"deck",[NSNumber numberWithInt:state[i].lapses],@"lapses",nil]];
-    }[out sortUsingDescriptors:[NSArray arrayWithObjects:[NSSortDescriptor sortDescriptorWithKey:@"lapses" ascending:NO],[NSSortDescriptor sortDescriptorWithKey:@"front" ascending:YES],nil]];return [out count]>8?[out subarrayWithRange:NSMakeRange(0,8)]:out;
+    } }[out sortUsingDescriptors:[NSArray arrayWithObjects:[NSSortDescriptor sortDescriptorWithKey:@"lapses" ascending:NO],[NSSortDescriptor sortDescriptorWithKey:@"front" ascending:YES],nil]];return [out count]>8?[out subarrayWithRange:NSMakeRange(0,8)]:out;
 }
 - (NSString *)coachSummaryForDeck:(NSString *)deck { CDCounts c=[self countsForDeck:deck];NSDictionary *s=[self statsSummary];return [NSString stringWithFormat:@"Study scope: %@. Available today: %ld new, %ld learning, %ld due reviews. Overall today: %@ answers, %@ minutes. Overall study streak: %@ days. Last 30 days: %@ reviewed cards, %@ percent remembered (-1 means no data). Target retention: %@ percent. The existing spaced-repetition schedule decides when cards return. No card contents are included unless the user selects a difficult card.",deck?:@"All decks",(long)c.fresh,(long)c.learning,(long)c.due,[s objectForKey:@"answersToday"],[s objectForKey:@"minutesToday"],[s objectForKey:@"streak"],[s objectForKey:@"reviews30"],[s objectForKey:@"retention"],[s objectForKey:@"target"]]; }
 
@@ -76,7 +76,9 @@ static int byTime(const void *a, const void *b) { const CDEntry *x = a, *y = b; 
         NSDictionary *c = [cards objectAtIndex:i]; NSUInteger k = [decks indexOfObject:[c objectForKey:@"deck"]]; deckOf[i] = k == NSNotFound ? 0 : (int)k;
         NSNumber *note = [ids objectForKey:[c objectForKey:@"note"] ?: @""]; noteOf[i] = note ? [note intValue] : (int)i;
     }
-    for (NSInteger k = 0; k < nlog; k++) { NSNumber *i = log[k].cid[0] ? [ids objectForKey:[NSString stringWithUTF8String:log[k].cid]] : nil; log[k].card = i ? [i intValue] : -1; }
+    for (NSInteger k = 0; k < nlog; k += 512) @autoreleasepool {   // a year of answers is tens of thousands of short-lived strings
+        for (NSInteger j = k; j < nlog && j < k + 512; j++) { NSNumber *i = log[j].cid[0] ? [ids objectForKey:[NSString stringWithUTF8String:log[j].cid]] : nil; log[j].card = i ? [i intValue] : -1; }
+    }
 }
 - (void)push:(CDEntry *)e { if (nlog == caplog) { caplog = caplog ? caplog * 2 : 1024; log = realloc(log, caplog * sizeof(CDEntry)); } log[nlog++] = *e; }
 - (void)loadLog {
@@ -84,13 +86,15 @@ static int byTime(const void *a, const void *b) { const CDEntry *x = a, *y = b; 
     NSMutableDictionary *ids = [NSMutableDictionary dictionaryWithCapacity:[cards count]];
     for (NSUInteger i = 0; i < [cards count]; i++) [ids setObject:[NSNumber numberWithInteger:i] forKey:[[cards objectAtIndex:i] objectForKey:@"id"]];
     const char *p = [d bytes], *end = p + [d length]; char line[512];
-    while (p && p < end) {
-        const char *nl = memchr(p, '\n', end - p); size_t len = (nl ? nl : end) - p;
-        if (len && len < sizeof line) {
-            memcpy(line, p, len); line[len] = 0; CDEntry e;
-            if (parseLine(line, &e)) { NSNumber *i = e.cid[0] ? [ids objectForKey:[NSString stringWithUTF8String:e.cid]] : nil; e.card = i ? [i intValue] : -1; [self push:&e]; }
+    while (p && p < end) @autoreleasepool {   // a pool per 512 lines
+        for (int n = 0; n < 512 && p && p < end; n++) {
+            const char *nl = memchr(p, '\n', end - p); size_t len = (nl ? nl : end) - p;
+            if (len && len < sizeof line) {
+                memcpy(line, p, len); line[len] = 0; CDEntry e;
+                if (parseLine(line, &e)) { NSNumber *i = e.cid[0] ? [ids objectForKey:[NSString stringWithUTF8String:e.cid]] : nil; e.card = i ? [i intValue] : -1; [self push:&e]; }
+            }
+            p = nl ? nl + 1 : end;
         }
-        p = nl ? nl + 1 : end;
     }
 }
 - (void)readSettings {
@@ -116,13 +120,16 @@ static int byTime(const void *a, const void *b) { const CDEntry *x = a, *y = b; 
     today = CDDay(now(), offsetNow());
     qsort(log, nlog, sizeof(CDEntry), byTime);
     NSMutableSet *undone = nil;
-    for (NSInteger k = 0; k < nlog; k++) if (log[k].undo[0]) { if (!undone) undone = [NSMutableSet set]; [undone addObject:[NSString stringWithUTF8String:log[k].undo]]; }
-    for (NSInteger k = 0; k < nlog; k++) {
-        CDEntry *e = &log[k];
-        if ((k && !strcmp(e->rid, log[k - 1].rid)) || e->undo[0] || e->card < 0 || e->card >= n || e->r < 1 || e->r > 4) continue;
-        if (undone && [undone containsObject:[NSString stringWithUTF8String:e->rid]]) continue;
-        [self apply:e];
+    for (NSInteger k = 0; k < nlog; k++) if (log[k].undo[0]) { if (!undone) undone = [[NSMutableSet alloc] init]; [undone addObject:[NSString stringWithUTF8String:log[k].undo]]; }
+    for (NSInteger b = 0; b < nlog; b += 512) @autoreleasepool {   // apply makes a few objects per answer: a pool per 512
+        for (NSInteger k = b; k < nlog && k < b + 512; k++) {
+            CDEntry *e = &log[k];
+            if ((k && !strcmp(e->rid, log[k - 1].rid)) || e->undo[0] || e->card < 0 || e->card >= n || e->r < 1 || e->r > 4) continue;
+            if (undone && [undone containsObject:[NSString stringWithUTF8String:e->rid]]) continue;
+            [self apply:e];
+        }
     }
+    [undone release];
 }
 - (BOOL)reloadIfChanged {
     BOOL changed = NO; long long size;

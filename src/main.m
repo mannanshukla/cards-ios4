@@ -5,7 +5,7 @@
 #import "CLPaper.h"
 #import "CDSkin.h"
 #import <QuartzCore/QuartzCore.h>
-@interface CDAppDelegate : NSObject <UIApplicationDelegate> { UIWindow *window; UITabBarController *tabs; }
+@interface CDAppDelegate : NSObject <UIApplicationDelegate> { UIWindow *window; UITabBarController *tabs; NSUInteger naps; }
 @end
 @implementation CDAppDelegate
 - (UINavigationController *)wrap:(UIViewController *)v title:(NSString *)title icon:(int)icon {
@@ -22,7 +22,18 @@
     float slow = [[NSUserDefaults standardUserDefaults] floatForKey:@"cd_test_speed"]; if (slow > 0) window.layer.speed = slow;   // slow motion, to catch an animation in a screenshot
     return YES;
 }
-- (void)applicationDidEnterBackground:(UIApplication *)app { CDPurge(); }   // suspended, Cards keeps only what is on screen
+- (void)applicationDidEnterBackground:(UIApplication *)app {   // suspended, Cards keeps none of its textures
+    CDPurge();   // screens out of sight let theirs go now (they watch for the background themselves)
+    // The system takes the snapshot it zooms back in from once this returns, so what is on screen goes a moment later.
+    NSUInteger nap = ++naps; __block UIBackgroundTaskIdentifier task = UIBackgroundTaskInvalid;
+    void (^end)(void) = ^{ if (task != UIBackgroundTaskInvalid) { [app endBackgroundTask:task]; task = UIBackgroundTaskInvalid; } };
+    task = [app beginBackgroundTaskWithExpirationHandler:end];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        if (nap == naps && app.applicationState == UIApplicationStateBackground) { [[NSNotificationCenter defaultCenter] postNotificationName:CDAsleep object:nil]; CDPurge(); }
+        end();
+    });
+}
+- (void)applicationWillEnterForeground:(UIApplication *)app { naps++; }   // a nap still pending is off; screens take their textures back on UIApplicationWillEnterForegroundNotification
 - (void)applicationDidReceiveMemoryWarning:(UIApplication *)app { CDPurge(); }
 - (void)applicationDidBecomeActive:(UIApplication *)app { [[NSUserDefaults standardUserDefaults] synchronize]; [[CDStore shared] reloadIfChanged]; }   // a sync, a settings change, or a new day
 - (void)dealloc { [tabs release]; [window release]; [super dealloc]; }

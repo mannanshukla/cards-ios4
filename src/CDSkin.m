@@ -3,6 +3,8 @@
 
 #define CD_SKIN_VERSION @"8"   // bump when a drawing changes, so cached textures are drawn again
 static NSMutableDictionary *memory = nil; static NSMutableString *timings = nil; static BOOL warm = NO;
+static int purges = 0, warmGen = 0;   // CDPurge counts up; a texture drawn across a purge is not kept, so CDWarmUp cannot refill the cache once suspended
+NSString *const CDAsleep = @"CDAsleep";
 
 UIImage *CDRender(CGSize size, void (^draw)(CGContextRef c)) {
     UIGraphicsBeginImageContextWithOptions(size, NO, 0); draw(UIGraphicsGetCurrentContext());
@@ -10,7 +12,7 @@ UIImage *CDRender(CGSize size, void (^draw)(CGContextRef c)) {
 }
 UIImage *CDCached(NSString *key, CGSize size, void (^draw)(CGContextRef c)) {
     @synchronized ([UIScreen class]) { if (!memory) { memory = [[NSMutableDictionary alloc] init]; timings = [[NSMutableString alloc] init]; } }
-    UIImage *i; @synchronized (memory) { i = [[[memory objectForKey:key] retain] autorelease]; } if (i) return i;   // CDWarmUp draws on another thread
+    UIImage *i; int gen; @synchronized (memory) { i = [[[memory objectForKey:key] retain] autorelease]; gen = [NSThread isMainThread] ? purges : warmGen; }   // off the main thread only CDWarmUp draws, for the purge it started after if (i) return i;   // CDWarmUp draws on another thread
     CGFloat scale = [[UIScreen mainScreen] scale];
     NSString *dir = [[NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES) objectAtIndex:0] stringByAppendingPathComponent:@"skin-" CD_SKIN_VERSION];
     NSString *path = [dir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@-%.0fx.png", key, scale]];
@@ -21,18 +23,21 @@ UIImage *CDCached(NSString *key, CGSize size, void (^draw)(CGContextRef c)) {
         @synchronized (memory) { [timings appendFormat:@"%@ %.0f ms%@\n", key, -[t0 timeIntervalSinceNow] * 1000, [NSThread isMainThread] ? @"" : @" (background)"]; }
         [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:NULL]; [UIImagePNGRepresentation(i) writeToFile:path atomically:YES];
     }
-    @synchronized (memory) { [memory setObject:i forKey:key]; } return i;
+    @synchronized (memory) { if (gen == purges) [memory setObject:i forKey:key]; } return i;
 }
 void CDPurge(void) {   // views keep the textures they show; the rest come back from Library/Caches, already drawn
     @synchronized ([UIScreen class]) { if (!memory) return; }
-    @synchronized (memory) { [memory removeAllObjects]; } warm = NO;
+    @synchronized (memory) { [memory removeAllObjects]; purges++; } warm = NO;
 }
 void CDWarmUp(void) {   // the desk's textures, drawn while the cabinet is on screen so the first card opens at once
-    if (warm) return; warm = YES;
+    if (warm) return; warm = YES; int gen; @synchronized ([UIScreen class]) { if (!memory) { memory = [[NSMutableDictionary alloc] init]; timings = [[NSMutableString alloc] init]; } } @synchronized (memory) { gen = warmGen = purges; }
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
         NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-        CDDeskImage(CGSizeMake(320, 416)); CDCardImage(YES, 1); CDCardImage(NO, 5); for (int k = 0; k < 3; k++) CDCardImage(NO, 2 + k);
-        for (int r = 1; r <= 4; r++) { CDStampImage(r, NO); CDStampImage(r, YES); for (int k = 0; k < 3; k++) CDImpressionImage(r, k); }
+        for (int s = 0; s < 6 + 4 * 5; s++) {
+            BOOL stale; @synchronized (memory) { stale = gen != purges; } if (stale) break;   // stops at the next texture once the app is purged in the background
+            if (s == 0) CDDeskImage(CGSizeMake(320, 416)); else if (s == 1) CDCardImage(YES, 1); else if (s == 2) CDCardImage(NO, 5); else if (s < 6) CDCardImage(NO, 2 + s - 3);
+            else { int r = 1 + (s - 6) / 5, k = (s - 6) % 5; if (k < 2) CDStampImage(r, k == 1); else CDImpressionImage(r, k - 2); }
+        }
         NSString *t; @synchronized (memory) { t = [[timings copy] autorelease]; }   // only non-empty after a fresh install: what each texture cost to draw
         if ([t length]) [t writeToFile:[[NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES) objectAtIndex:0] stringByAppendingPathComponent:@"skin-timing.txt"] atomically:YES encoding:NSUTF8StringEncoding error:NULL];
         [pool release];

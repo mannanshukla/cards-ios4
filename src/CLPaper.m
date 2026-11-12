@@ -9,9 +9,11 @@ t.backgroundView=nil;t.backgroundColor=JRPaper();t.separatorColor=JRRule();
 UIImage *CLCoachIcon(void) { UIGraphicsBeginImageContextWithOptions(CGSizeMake(28,28),NO,0);CGContextRef c=UIGraphicsGetCurrentContext();CGContextSetFillColorWithColor(c,[UIColor whiteColor].CGColor);UIBezierPath *p=[UIBezierPath bezierPathWithRoundedRect:CGRectMake(2,3,24,18) cornerRadius:5];[p fill];CGContextMoveToPoint(c,7,19);CGContextAddLineToPoint(c,7,26);CGContextAddLineToPoint(c,15,20);CGContextFillPath(c);CGContextSetBlendMode(c,kCGBlendModeClear);CGContextFillRect(c,CGRectMake(7,8,14,2));CGContextFillRect(c,CGRectMake(7,13,10,2));UIImage *im=UIGraphicsGetImageFromCurrentImageContext();UIGraphicsEndImageContext();return im; }
 @interface CLNotePage : UIView { ORTextLayout *layout; NSUInteger page; }
 - (id)initWithLayout:(ORTextLayout *)layout page:(NSUInteger)page;
+- (void)setLayout:(ORTextLayout *)layout page:(NSUInteger)page;
 @end
 @implementation CLNotePage
 - (id)initWithLayout:(ORTextLayout *)l page:(NSUInteger)p { if((self=[super initWithFrame:CGRectMake(0,0,[l widthOfPage:p],[l heightOfPage:p])])) { layout=[l retain];page=p;self.backgroundColor=[UIColor clearColor];self.opaque=NO; }return self; }
+- (void)setLayout:(ORTextLayout *)l page:(NSUInteger)p { [l retain];[layout release];layout=l;page=p;self.frame=CGRectMake(0,0,[l widthOfPage:p],[l heightOfPage:p]);[self setNeedsDisplay]; }
 - (void)drawRect:(CGRect)rect { [layout drawPage:page context:UIGraphicsGetCurrentContext() origin:CGPointZero]; }
 - (void)dealloc { [layout release];[super dealloc]; }
 @end
@@ -26,11 +28,19 @@ UIImage *CLCoachIcon(void) { UIGraphicsBeginImageContextWithOptions(CGSizeMake(2
 - (UITableViewCell *)tableView:(UITableView *)t cellForRowAtIndexPath:(NSIndexPath *)p {
     UITableViewCell *cell=[t dequeueReusableCellWithIdentifier:@"paper"];
     if(!cell)cell=[[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"paper"] autorelease];
-    for(UIView *v in [[cell.contentView.subviews copy] autorelease])[v removeFromSuperview];cell.selectionStyle=UITableViewCellSelectionStyleNone;cell.backgroundColor=[UIColor clearColor];
+    // A reused row keeps its holder and page view, so scrolling a long note redraws into the same backing store
+    // instead of allocating a new one (up to 0.4 MB) for every page that comes into view.
+    UIScrollView *holder=(UIScrollView *)[cell.contentView viewWithTag:31];CLNotePage *page=(CLNotePage *)[holder viewWithTag:32];
+    if(!holder || !page) { for(UIView *v in [[cell.contentView.subviews copy] autorelease])[v removeFromSuperview];holder=nil;page=nil; }
+    cell.selectionStyle=UITableViewCellSelectionStyleNone;cell.backgroundColor=[UIColor clearColor];
     BOOL box=![[layout kindOfPage:p.row] isEqual:@"text"];CGFloat w=t.bounds.size.width-36;
-    UIScrollView *holder=[[[UIScrollView alloc] initWithFrame:CGRectMake(18,8,w,[layout heightOfPage:p.row]) ] autorelease];holder.scrollEnabled=box;holder.directionalLockEnabled=YES;holder.contentSize=CGSizeMake([layout widthOfPage:p.row],[layout heightOfPage:p.row]);
+    if(!holder) { holder=[[[UIScrollView alloc] initWithFrame:CGRectMake(18,8,w,[layout heightOfPage:p.row]) ] autorelease];holder.tag=31;holder.directionalLockEnabled=YES;[cell.contentView addSubview:holder]; }
+    holder.frame=CGRectMake(18,8,w,[layout heightOfPage:p.row]);holder.contentOffset=CGPointZero;holder.scrollEnabled=box;holder.contentSize=CGSizeMake([layout widthOfPage:p.row],[layout heightOfPage:p.row]);
     if(box) { holder.backgroundColor=CLColor(0xE8DECC);holder.layer.cornerRadius=5;holder.layer.borderWidth=1;holder.layer.borderColor=CLColor(0xC4B59C).CGColor; }
-    CLNotePage *page=[[[CLNotePage alloc] initWithLayout:layout page:p.row] autorelease];[holder addSubview:page];[cell.contentView addSubview:holder];return cell;
+    else { holder.backgroundColor=nil;holder.layer.cornerRadius=0;holder.layer.borderWidth=0; }
+    if(page)[page setLayout:layout page:p.row];
+    else { page=[[[CLNotePage alloc] initWithLayout:layout page:p.row] autorelease];page.tag=32;[holder addSubview:page]; }
+    return cell;
 }
 @end
 @implementation CLNotesViewController

@@ -18,3 +18,6 @@ UIImage *CDTabIcon(int which);   // 0 decks, 1 stats
 UIImage *CDSheetImage(CGFloat height, uint32_t seed);   // a sheet of paper for Stats, with room around it for its shadow
 void CDWarmUp(void);           // draws the desk's textures in the background, once until the next CDPurge
 void CDPurge(void);            // empties the memory cache: on entering the background and on memory warnings
+// Posted a moment after entering the background, once the system has taken the snapshot it zooms back in from:
+// screens then let go of even the textures they show, and take them back from Library/Caches on coming forward.
+extern NSString *const CDAsleep;

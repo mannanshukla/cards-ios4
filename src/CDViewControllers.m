@@ -24,16 +24,33 @@ static NSString *countsLine(CDCounts n) {
     return days < 0 ? @"All done" : days == 1 ? @"Done · more tomorrow" : [NSString stringWithFormat:@"Done · more in %ld days", days];
 }
 
+// Each screen lets go of its textures (sleep) when it is out of sight as the app leaves or memory runs low, and even
+// on screen once the system has its snapshot (CDAsleep); it takes them back (wake) on coming forward or into view.
+static void watchSleep(id vc) {
+    NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
+    [nc addObserver:vc selector:@selector(outOfSight) name:UIApplicationDidEnterBackgroundNotification object:nil];
+    [nc addObserver:vc selector:@selector(outOfSight) name:UIApplicationDidReceiveMemoryWarningNotification object:nil];
+    [nc addObserver:vc selector:@selector(sleep) name:CDAsleep object:nil];
+    [nc addObserver:vc selector:@selector(inSight) name:UIApplicationWillEnterForegroundNotification object:nil];
+}
+#define SLEEP_WATCHERS \
+- (void)outOfSight { if (self.isViewLoaded && !self.view.window) [self sleep]; } \
+- (void)inSight { if (self.isViewLoaded && self.view.window) [self wake]; }
+
 @implementation CDDecksViewController
 - (id)init {
     if ((self = [super init])) {
         self.title = @"Cards"; items = [[NSMutableArray alloc] init]; targets = [[NSMutableArray alloc] init];
         self.navigationItem.backBarButtonItem = [[[UIBarButtonItem alloc] initWithTitle:@"Decks" style:UIBarButtonItemStyleBordered target:nil action:nil] autorelease];
-        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(refresh) name:CDStoreChanged object:nil];
+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(refresh) name:CDStoreChanged object:nil]; watchSleep(self);
     }
     return self;
 }
-- (void)dealloc { [[NSNotificationCenter defaultCenter] removeObserver:self]; [poll invalidate]; [poll release]; [scroll release]; [items release]; [targets release]; [super dealloc]; }
+- (void)dealloc { [[NSNotificationCenter defaultCenter] removeObserver:self]; [poll invalidate]; [poll release]; [scroll release]; [items release]; [targets release]; [shown release]; [super dealloc]; }
+SLEEP_WATCHERS
+- (void)dropStacks { for (UIView *v in items) [v removeFromSuperview]; [items removeAllObjects]; [targets removeAllObjects]; [shown release]; shown = nil; }
+- (void)sleep { if (!self.isViewLoaded || dormant) return; [self dropStacks]; scroll.backgroundColor = nil; dormant = YES; }   // the oak (2.4 MB) and the stacks (0.3 MB a deck)
+- (void)wake { if (!dormant) return; dormant = NO; scroll.backgroundColor = CDDeskColor(); [self refresh]; }
 - (void)loadView {
     UIView *v = [[[UIView alloc] initWithFrame:CGRectMake(0, 0, 320, 416)] autorelease]; self.view = v;
     scroll = [[UIScrollView alloc] initWithFrame:v.bounds]; scroll.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
@@ -58,10 +75,27 @@ static NSString *countsLine(CDCounts n) {
     UILabel *name = pressedLabel(CGRectMake(o.x, o.y + CD_STACK_H - 3, CD_STACK_W, 19), [UIFont boldSystemFontOfSize:15], [UIColor colorWithRed:0.20 green:0.12 blue:0.04 alpha:1]); name.text = all ? @"All Decks" : leaf(d); [self add:name];
     UILabel *counts = pressedLabel(CGRectMake(o.x, o.y + CD_STACK_H + 16, CD_STACK_W, 16), [UIFont systemFontOfSize:12.5], [UIColor colorWithRed:0.33 green:0.21 blue:0.08 alpha:1]); counts.text = countsLine(n); [self add:counts];
 }
-- (void)viewDidUnload { [super viewDidUnload]; [items removeAllObjects]; [targets removeAllObjects]; [scroll release]; scroll = nil; }   // a memory warning while Study or Stats is up
+- (void)viewDidUnload { [super viewDidUnload]; [self dropStacks]; [scroll release]; scroll = nil; dormant = NO; }   // a memory warning while Study or Stats is up
+static NSString *footLine(CDStore *st) {
+    NSDate *d = [st syncedAt]; NSString *foot = plural([st cardCount], @"card", @"cards");
+    if (d) {
+        NSDateFormatter *df = [[[NSDateFormatter alloc] init] autorelease], *tf = [[[NSDateFormatter alloc] init] autorelease]; [df setDateStyle:NSDateFormatterMediumStyle]; [tf setTimeStyle:NSDateFormatterShortStyle];
+        NSString *day = [df stringFromDate:d], *when = [day isEqualToString:[df stringFromDate:[NSDate date]]] ? @"today" : [day isEqualToString:[df stringFromDate:[NSDate dateWithTimeIntervalSinceNow:-86400]]] ? @"yesterday" : [@"on " stringByAppendingString:day];
+        foot = [NSString stringWithFormat:@"%@ · synced %@ at %@%@%@", foot, when, [tf stringFromDate:d], [st syncedFrom] ? @" from " : @"", [st syncedFrom] ?: @""];
+    }
+    return foot;
+}
+static NSString *countsKey(CDCounts n) { return [NSString stringWithFormat:@"%ld,%ld,%ld,%ld,%ld", (long)n.fresh, (long)n.learning, (long)n.due, n.nextDay, n.today]; }
+- (NSString *)signature {   // everything the desk shows; the 30 s tick rebuilds it only when one of these has changed
+    CDStore *st = [CDStore shared]; if (![st cardCount]) return @"";
+    NSMutableString *k = [NSMutableString stringWithFormat:@"%@\n%@", footLine(st), countsKey([st countsForDeck:nil])];
+    for (NSString *d in [st decks]) [k appendFormat:@"\n%@\n%lu %@", d, (unsigned long)[st cardsInDeck:d], countsKey([st countsForDeck:d])];
+    return k;
+}
 - (void)refresh {
-    if (!self.isViewLoaded) return;
-    for (UIView *v in items) [v removeFromSuperview]; [items removeAllObjects]; [targets removeAllObjects];
+    if (!self.isViewLoaded || dormant) return;
+    NSString *key = [self signature]; if (shown && [key isEqualToString:shown]) return;
+    [self dropStacks]; shown = [key copy];
     CDStore *st = [CDStore shared]; NSArray *decks = [st decks]; CGFloat y = 14;
     if (![st cardCount]) {   // one blank card, and what to do about it
         UIImageView *card = [[[UIImageView alloc] initWithImage:CDCardImage(YES, 1)] autorelease]; card.frame = CGRectMake(12 - CD_CARD_PAD, 40 - CD_CARD_PAD, card.image.size.width, card.image.size.height); [self add:card];
@@ -80,13 +114,7 @@ static NSString *countsLine(CDCounts n) {
         if ([f length]) { UIImageView *h = [[[UIImageView alloc] initWithImage:CDSectionHeaderImage([f uppercaseString])] autorelease]; h.frame = CGRectMake(0, y, 320, 26); [self add:h]; y += 34; }
         for (NSUInteger i = 0; i < [row count]; i++) { [self stack:[row objectAtIndex:i] at:CGPointMake(i % 2 ? 162 : 8, y)]; if (i % 2 || i == [row count] - 1) y += CD_STACK_H + 46; }
     }
-    NSDate *d = [st syncedAt]; NSString *foot = plural([st cardCount], @"card", @"cards");
-    if (d) {
-        NSDateFormatter *df = [[[NSDateFormatter alloc] init] autorelease], *tf = [[[NSDateFormatter alloc] init] autorelease]; [df setDateStyle:NSDateFormatterMediumStyle]; [tf setTimeStyle:NSDateFormatterShortStyle];
-        NSString *day = [df stringFromDate:d], *when = [day isEqualToString:[df stringFromDate:[NSDate date]]] ? @"today" : [day isEqualToString:[df stringFromDate:[NSDate dateWithTimeIntervalSinceNow:-86400]]] ? @"yesterday" : [@"on " stringByAppendingString:day];
-        foot = [NSString stringWithFormat:@"%@ · synced %@ at %@%@%@", foot, when, [tf stringFromDate:d], [st syncedFrom] ? @" from " : @"", [st syncedFrom] ?: @""];
-    }
-    UILabel *l = pressedLabel(CGRectMake(10, y, 300, 16), [UIFont systemFontOfSize:11], [UIColor colorWithRed:0.40 green:0.26 blue:0.10 alpha:1]); l.text = foot; l.adjustsFontSizeToFitWidth = YES; l.minimumFontSize = 9; [self add:l];
+    UILabel *l = pressedLabel(CGRectMake(10, y, 300, 16), [UIFont systemFontOfSize:11], [UIColor colorWithRed:0.40 green:0.26 blue:0.10 alpha:1]); l.text = footLine(st); l.adjustsFontSizeToFitWidth = YES; l.minimumFontSize = 9; [self add:l];
     scroll.contentSize = CGSizeMake(320, MAX(y + 30, 417));
 }
 - (void)lift:(UIButton *)b { [scroll bringSubviewToFront:b]; [UIView animateWithDuration:0.12 animations:^{ b.transform = CGAffineTransformScale(CGAffineTransformMakeTranslation(0, -3), 1.06, 1.06); }]; }   // picked up off the desk
@@ -96,7 +124,8 @@ static NSString *countsLine(CDCounts n) {
     [UIView animateWithDuration:0.1 animations:^{ b.transform = CGAffineTransformScale(CGAffineTransformMakeTranslation(0, -4), 1.08, 1.08); } completion:^(BOOL f) { [self study:[d isKindOfClass:[NSNull class]] ? nil : d]; b.transform = CGAffineTransformIdentity; }];
 }
 - (void)viewWillAppear:(BOOL)a {
-    [super viewWillAppear:a]; if (![[CDStore shared] reloadIfChanged]) [self refresh];
+    [super viewWillAppear:a]; if (dormant) { dormant = NO; scroll.backgroundColor = CDDeskColor(); }
+    if (![[CDStore shared] reloadIfChanged]) [self refresh];
     [poll invalidate]; [poll release]; poll = [[NSTimer scheduledTimerWithTimeInterval:3 target:self selector:@selector(tick) userInfo:nil repeats:YES] retain];
 }
 - (void)viewWillDisappear:(BOOL)a { [super viewWillDisappear:a]; [poll invalidate]; [poll release]; poll = nil; }
@@ -143,9 +172,34 @@ static NSString *esc(NSString *s) { return [[[s stringByReplacingOccurrencesOfSt
     if ((self = [super init])) {
         deck = [d copy]; current = -1; self.title = d ? leaf(d) : @"All Decks"; self.hidesBottomBarWhenPushed = YES;
         self.navigationItem.rightBarButtonItem = [[[UIBarButtonItem alloc] initWithTitle:@"Undo" style:UIBarButtonItemStyleBordered target:self action:@selector(undo)] autorelease];
-        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(storeChanged) name:CDStoreChanged object:nil];
+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(storeChanged) name:CDStoreChanged object:nil]; watchSleep(self);
     }
     return self;
+}
+SLEEP_WATCHERS
+#define DESK_TAG 75
+#define PAPER_TAG 76
+- (void)sleep {   // the desk (2.1 MB) and five index cards (1 MB each); the web views keep the writing
+    if (!self.isViewLoaded || dormant) return; dormant = YES;
+    [(UIImageView *)[self.view viewWithTag:DESK_TAG] setImage:nil]; [(UIImageView *)[front viewWithTag:PAPER_TAG] setImage:nil]; [(UIImageView *)[back viewWithTag:PAPER_TAG] setImage:nil];
+    for (int k = 0; k < 3; k++) peek[k].image = nil;
+    tab.image = nil;
+}
+- (void)wake {
+    if (!dormant) return; dormant = NO;
+    [(UIImageView *)[self.view viewWithTag:DESK_TAG] setImage:CDDeskImage(CGSizeMake(320, 416))]; [(UIImageView *)[front viewWithTag:PAPER_TAG] setImage:CDCardImage(YES, 1)]; [(UIImageView *)[back viewWithTag:PAPER_TAG] setImage:CDCardImage(NO, 5)];
+    for (int k = 0; k < 3; k++) peek[k].image = CDCardImage(NO, 2 + k);
+    [self updateTab];
+}
+- (void)viewWillAppear:(BOOL)a { [super viewWillAppear:a]; [self wake]; }
+- (void)viewDidUnload {   // a memory warning while it is out of sight: viewDidLoad deals the next card again
+    [super viewDidUnload];
+    [NSObject cancelPreviousPerformRequestsWithTarget:self]; [waitTimer invalidate]; waitTimer = nil;
+    frontWeb.delegate = nil; backWeb.delegate = nil; [frontWeb stopLoading]; [backWeb stopLoading];
+    [frontWeb release]; frontWeb = nil; [backWeb release]; backWeb = nil; [front release]; front = nil; [back release]; back = nil; [host release]; host = nil; [tab release]; tab = nil;
+    for (int k = 0; k < 3; k++) { [peek[k] release]; peek[k] = nil; }
+    [hint release]; hint = nil; [stamps release]; stamps = nil; [intervals release]; intervals = nil;
+    busy = revealed = revealOnLoad = dormant = NO;
 }
 - (void)dealloc {
     [[NSNotificationCenter defaultCenter] removeObserver:self]; [NSObject cancelPreviousPerformRequestsWithTarget:self]; [waitTimer invalidate];
@@ -154,18 +208,18 @@ static NSString *esc(NSString *s) { return [[[s stringByReplacingOccurrencesOfSt
     [deck release]; [shownAt release]; [stamps release]; [intervals release]; [hint release]; [super dealloc];
 }
 - (UIWebView *)web:(CGRect)r {
-    UIWebView *w = [[UIWebView alloc] initWithFrame:r]; w.delegate = self; w.opaque = NO; w.backgroundColor = [UIColor clearColor];
+    UIWebView *w = [[[UIWebView alloc] initWithFrame:r] autorelease]; w.delegate = self; w.opaque = NO; w.backgroundColor = [UIColor clearColor];   // loadView retains the two it keeps
     for (UIView *s in [[[w subviews] lastObject] subviews]) if ([s isKindOfClass:[UIImageView class]]) s.hidden = YES;   // the scroll view's shadow images
     return w;
 }
 - (UIView *)face:(BOOL)ruled seed:(uint32_t)seed web:(UIWebView **)w {
     UIView *f = [[UIView alloc] initWithFrame:host.bounds];
-    UIImageView *paper = [[[UIImageView alloc] initWithImage:CDCardImage(ruled, seed)] autorelease]; paper.frame = CGRectInset(f.bounds, -CD_CARD_PAD, -CD_CARD_PAD); [f addSubview:paper];
+    UIImageView *paper = [[[UIImageView alloc] initWithImage:CDCardImage(ruled, seed)] autorelease]; paper.tag = PAPER_TAG; paper.frame = CGRectInset(f.bounds, -CD_CARD_PAD, -CD_CARD_PAD); [f addSubview:paper];
     *w = [self web:CGRectMake(0, 0, CD_CARD_W, CD_CARD_H - 4)]; [f addSubview:*w]; return f;
 }
 - (void)loadView {
     UIView *v = [[[UIView alloc] initWithFrame:CGRectMake(0, 0, 320, 416)] autorelease]; self.view = v;
-    [v addSubview:[[[UIImageView alloc] initWithImage:CDDeskImage(CGSizeMake(320, 416))] autorelease]];
+    UIImageView *desk = [[[UIImageView alloc] initWithImage:CDDeskImage(CGSizeMake(320, 416))] autorelease]; desk.tag = DESK_TAG; [v addSubview:desk];
     tab = [[UIImageView alloc] initWithFrame:CGRectMake(40, 5, 240, 30)]; [v addSubview:tab];
     CGRect card = CGRectMake(12, 46, CD_CARD_W, CD_CARD_H);
     static const CGFloat lean[3][3] = { { -2.4, -2, 5 }, { 3.2, 3, 9 }, { -4.2, -4, 12 } };   // the cards still to come, squared up badly
@@ -207,7 +261,7 @@ static NSString *esc(NSString *s) { return [[[s stringByReplacingOccurrencesOfSt
 
 - (void)updateTab {
     CDCounts c = [[CDStore shared] countsForDeck:deck];
-    tab.image = CDRender(tab.bounds.size, ^(CGContextRef ctx) { CDDrawCountTab(ctx, CGRectMake(0, 0, 240, 30), c.fresh, c.learning, c.due); });
+    if (!dormant) tab.image = CDRender(tab.bounds.size, ^(CGContextRef ctx) { CDDrawCountTab(ctx, CGRectMake(0, 0, 240, 30), c.fresh, c.learning, c.due); });   // wake draws it
     NSInteger left = c.fresh + c.learning + c.due - (current >= 0 ? 1 : 0);
     for (int k = 0; k < 3; k++) peek[k].hidden = k >= left;   // up to three cards wait under this one
     self.navigationItem.rightBarButtonItem.enabled = [[CDStore shared] canUndo] && !busy;
@@ -304,8 +358,7 @@ static NSString *esc(NSString *s) { return [[[s stringByReplacingOccurrencesOfSt
 - (id)init {
     if ((self = [super init])) {
         self.title = @"Stats"; items = [[NSMutableArray alloc] init];
-        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(refresh) name:CDStoreChanged object:nil];
-        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(backgrounded) name:UIApplicationDidEnterBackgroundNotification object:nil];
+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(refresh) name:CDStoreChanged object:nil]; watchSleep(self);
     }
     return self;
 }
@@ -315,12 +368,17 @@ static NSString *esc(NSString *s) { return [[[s stringByReplacingOccurrencesOfSt
     scroll = [[UIScrollView alloc] initWithFrame:v.bounds]; scroll.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     scroll.backgroundColor = CDDeskColor(); scroll.alwaysBounceVertical = YES; [v addSubview:scroll]; [v addSubview:CDTopShade(320)];
 }
-- (void)viewWillAppear:(BOOL)a { [super viewWillAppear:a]; if (![[CDStore shared] reloadIfChanged]) [self refresh]; }
+- (void)viewWillAppear:(BOOL)a {
+    [super viewWillAppear:a]; if (dormant) { dormant = NO; scroll.backgroundColor = CDDeskColor(); }
+    if (![[CDStore shared] reloadIfChanged]) [self refresh];
+}
 - (void)dropCharts { for (UIView *v in items) [v removeFromSuperview]; [items removeAllObjects]; [drawn release]; drawn = nil; }   // about 5 MB of sheets; drawn again when the tab next appears
-- (void)viewDidUnload { [super viewDidUnload]; [self dropCharts]; [scroll release]; scroll = nil; }   // otherwise the new scroll view stays empty while `drawn` still matches
-- (void)backgrounded { if (self.isViewLoaded && !self.view.window) [self dropCharts]; }
+- (void)viewDidUnload { [super viewDidUnload]; [self dropCharts]; [scroll release]; scroll = nil; dormant = NO; }   // otherwise the new scroll view stays empty while `drawn` still matches
+SLEEP_WATCHERS
+- (void)sleep { if (!self.isViewLoaded || dormant) return; [self dropCharts]; scroll.backgroundColor = nil; dormant = YES; }   // the sheets, and the oak under them (2.4 MB)
+- (void)wake { if (!dormant) return; dormant = NO; scroll.backgroundColor = CDDeskColor(); [self refresh]; }
 - (void)refresh {
-    if (!self.isViewLoaded) return;
+    if (!self.isViewLoaded || dormant) return;   // asleep, the charts wait until the tab is seen
     NSDictionary *st = [[CDStore shared] statsSummary]; NSString *key = [st description];
     if ([key isEqualToString:drawn]) return;   // nothing has changed since these were drawn
     [drawn release]; drawn = [key copy];
